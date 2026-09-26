@@ -1,0 +1,142 @@
+// Copy these models into the host Prisma schema, then migrate.
+
+model WhatsAppAccount {
+  id                     String    @id @default(uuid())
+  isSelected             Boolean   @default(false)
+  metaAppId              String?
+  metaAppSecret          String?   @db.Text
+  embeddedSignupConfigId String?
+  wabaId                 String?
+  phoneNumberId          String?
+  businessId             String?
+  accessToken            String?   @db.Text
+  verifyToken            String?
+  displayName            String?
+  displayPhone           String?
+  qualityRating          String?
+  connectedAt            DateTime?
+  lastWebhookAt          DateTime?
+  lastWebhookFields      String?
+  updatedAt              DateTime  @updatedAt
+}
+
+model WhatsAppTemplate {
+  id              String             @id @default(uuid())
+  accountId       String?
+  metaId          String?            @unique
+  name            String
+  language        String             @default("en")
+  category        String             @default("UTILITY")
+  status          String             @default("DRAFT")
+  bodyText        String             @db.Text
+  components      Json?
+  variableKeys    Json?
+  rejectionReason String?            @db.Text
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  campaigns       WhatsAppCampaign[]
+
+  @@index([accountId])
+}
+
+model WhatsAppCampaign {
+  id          String         @id @default(uuid())
+  accountId   String?
+  name        String
+  templateId  String
+  template    WhatsAppTemplate @relation(fields: [templateId], references: [id])
+  audience    String         @default("ORDERS")
+  status      String         @default("DRAFT")
+  queuedCount Int            @default(0)
+  sentCount   Int            @default(0)
+  failedCount Int            @default(0)
+  sentAt      DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  queueItems  WhatsAppQueue[]
+
+  @@index([accountId])
+}
+
+model WhatsAppQueue {
+  id            String            @id @default(uuid())
+  accountId     String?
+  phone         String
+  userId        String?
+  userEmail     String?
+  campaignId    String?
+  campaign      WhatsAppCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  flowStepId    String?
+  templateName  String
+  language      String            @default("en")
+  params        Json?
+  status        String            @default("PENDING")
+  scheduledFor  DateTime
+  sentAt        DateTime?
+  errorLogs     String?           @db.Text
+  metaMessageId String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([accountId])
+  @@index([status, scheduledFor])
+}
+
+model WhatsAppContact {
+  id            String    @id @default(uuid())
+  accountId     String?
+  phone         String
+  displayName   String?
+  lastMessage   String?
+  lastMessageAt DateTime?
+  unreadCount   Int       @default(0)
+  optedOut      Boolean   @default(false)
+  optedOutAt    DateTime?
+  lastInboundAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([accountId, phone])
+  @@index([accountId, lastMessageAt])
+}
+
+model WhatsAppMessage {
+  id            String   @id @default(uuid())
+  accountId     String?
+  phone         String
+  direction     String
+  type          String   @default("text")
+  body          String   @db.Text
+  templateName  String?
+  metaMessageId String?  @unique
+  status        String?
+  contactName   String?
+  raw           Json?
+  createdAt     DateTime @default(now())
+
+  @@index([accountId, phone, createdAt])
+}
+
+model WhatsAppFlow {
+  id          String            @id @default(uuid())
+  accountId   String?
+  name        String
+  triggerType String
+  isActive    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  steps       WhatsAppFlowStep[]
+
+  @@index([accountId, triggerType])
+}
+
+model WhatsAppFlowStep {
+  id            String       @id @default(uuid())
+  flowId        String
+  flow          WhatsAppFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  sequenceOrder Int          @default(1)
+  delayHours    Int          @default(0)
+  templateName  String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
