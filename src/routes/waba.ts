@@ -1,5 +1,8 @@
 import { Router } from 'express'
 import crypto from 'crypto'
+import assistantRouter from './wabaAssistant'
+import analyticsRouter from './wabaAnalytics'
+import updatesRouter from './wabaUpdates'
 import { getWabaPrisma, wabaRequireAdmin as requireAdmin } from '../lib/adapters'
 import { WABA_AUDIENCES, WABA_TEMPLATE_CATEGORIES } from '../lib/waba'
 import { WABA_FEATURE_PAUSED } from '../lib/wabaFlags'
@@ -34,6 +37,7 @@ const prisma = new Proxy({} as any, {
 })
 
 const router = Router()
+router.use('/updates', updatesRouter)
 
 router.use((_req, res, next) => {
     if (WABA_FEATURE_PAUSED) {
@@ -41,6 +45,9 @@ router.use((_req, res, next) => {
     }
     next()
 })
+
+router.use('/assistant', assistantRouter)
+router.use('/analytics', analyticsRouter)
 
 router.get('/', requireAdmin, async (req, res) => {
     try {
@@ -238,7 +245,7 @@ router.post('/test', requireAdmin, async (req, res) => {
 router.get('/inbox', requireAdmin, async (req, res) => {
     try {
         const conversations = await listWabaConversations(String(req.query.accountId || ''))
-        res.json({ success: true, conversations, unread: conversations.reduce((sum, item) => sum + (item.unreadCount || 0), 0) })
+        res.json({ success: true, conversations, unread: conversations.reduce((sum: number, item: any) => sum + (item.unreadCount || 0), 0) })
     } catch (error: any) {
         res.status(500).json({ error: error.message || 'Could not load inbox' })
     }

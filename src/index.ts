@@ -18,3 +18,13 @@ export {
 } from './lib/wabaService'
 export { default as wabaAdminRouter } from './routes/waba'
 export { default as wabaWebhookRouter } from './routes/wabaPublic'
+
+export type { AssistantAdapters, AssistantSettings, PaymentReceipt } from './lib/assistantTypes'
+export { assistantDefaults } from './lib/assistantDefaults'
+export { processAssistantJobs } from './lib/assistantWorker'
+export { razorpayAssistantAdapters, googleCalendarAssistantAdapters } from './lib/assistantProviders'
+export { getAssistantSettings, saveAssistantSettings } from './lib/assistantStore'
+export { listAvailableSlots, holdBooking, confirmBooking } from './lib/assistantBookings'
+
+export { installedWabaVersion, webhookWabaUpdater } from './lib/wabaUpdates'
+export type { WabaRelease, WabaUpdateAdapter } from './lib/wabaUpdates'

@@ -2,14 +2,18 @@
 
 import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
-import { Loader2, MessageSquare, Workflow, FileText, Megaphone, Plug, ChevronRight } from 'lucide-react'
+import { BarChart3, Smartphone, Bot, Loader2, MessageSquare, Workflow, FileText, Megaphone, Plug, ChevronRight } from 'lucide-react'
 import { cn } from '../lib/cn'
 import { WABA_GRAPH_VERSION, embeddedSignupDialogUrl, isFacebookMessageOrigin, parseEmbeddedSignupMessage, wabaOauthRedirectUri } from '../lib/wabaSignup'
 import { WABA_FEATURE_PAUSED } from '../lib/wabaFlags'
 import { WabaInbox } from './WabaInbox'
 import { WabaFlows } from './WabaFlows'
+import { WabaAssistant } from './WabaAssistant'
+import { WabaUpdates } from './WabaUpdates'
 
-type Tab = 'inbox' | 'flows' | 'connect' | 'templates' | 'campaigns'
+import { WabaAnalytics } from './WabaAnalytics'
+
+type Tab = 'analytics' | 'numbers' | 'assistant' | 'inbox' | 'flows' | 'connect' | 'templates' | 'campaigns'
 type Account = {
     id: string
     isSelected: boolean
@@ -92,14 +96,17 @@ const emptyStatus: Status = {
 }
 
 const TABS: { id: Tab; label: string }[] = [
+    { id: 'assistant', label: 'AI assistant' },
     { id: 'inbox', label: 'Shared inbox' },
     { id: 'flows', label: 'Automation' },
     { id: 'templates', label: 'Templates' },
     { id: 'campaigns', label: 'Campaigns' },
-    { id: 'connect', label: 'Integrations' },
+    { id: 'analytics', label: 'Analytics' },
+    { id: 'numbers', label: 'WhatsApp numbers' },
+    { id: 'connect', label: 'Settings' },
 ]
 
-const tabIcons = { inbox: MessageSquare, flows: Workflow, templates: FileText, campaigns: Megaphone, connect: Plug }
+const tabIcons = { analytics: BarChart3, numbers: Smartphone, assistant: Bot, inbox: MessageSquare, flows: Workflow, templates: FileText, campaigns: Megaphone, connect: Plug }
 
 const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20'
 const btnClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-[#00685d] px-4 text-sm font-semibold text-white disabled:opacity-50'
@@ -117,6 +124,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export function WabaBoard() {
     const [tab, setTab] = useState<Tab>('inbox')
     const [status, setStatus] = useState<Status>(emptyStatus)
+    const [numberPage, setNumberPage] = useState(0)
     const [accounts, setAccounts] = useState<Account[]>([])
     const [templates, setTemplates] = useState<any[]>([])
     const [campaigns, setCampaigns] = useState<any[]>([])
@@ -329,6 +337,7 @@ export function WabaBoard() {
                 <p className="max-w-xl rounded-xl bg-amber-50 p-6 text-sm font-semibold text-amber-900">
                     WhatsApp WABA is paused. Inbox polling, campaigns, and event flows are off so they do not hit the database. Connected numbers and templates stay saved. Say when you want this turned back on.
                 </p>
+                <WabaUpdates />
             </div>
         )
     }
@@ -341,6 +350,9 @@ export function WabaBoard() {
         )
     }
 
+    const pageCount = Math.max(1, Math.ceil(accounts.length / 20))
+    const page = Math.min(numberPage, pageCount - 1)
+    const first = page * 20
     const approved = templates.filter((item) => String(item.status).toUpperCase() === 'APPROVED')
 
     return (
@@ -354,17 +366,20 @@ export function WabaBoard() {
                 <div className="mt-auto rounded-lg border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-500">WhatsApp Business Platform<p className="mt-1 font-medium text-[#00685d]">Customer conversations, connected.</p></div>
             </aside>
             <main className="min-w-0">
-                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{TABS.find(item => item.id === tab)?.label}</span></p><span role="status" className={cn('rounded-full px-3 py-1.5 text-xs font-medium', status.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>{status.connected ? '● Connected' : status.pendingPhone ? '● Phone pending' : '○ Not connected'}</span></header>
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{TABS.find(item => item.id === tab)?.label}</span></p><button type="button" onClick={() => setTab('numbers')} title="Switch WhatsApp number" className={cn('rounded-full px-3 py-1.5 text-xs font-medium', status.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>{status.connected ? '● Connected' : status.pendingPhone ? '● Phone pending' : '○ Not connected'}</button></header>
                 <div className="space-y-6 p-4 lg:p-7">
-                <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{TABS.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Connect and manage your WhatsApp Business numbers.' }[tab]}</p></div>
+                <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{TABS.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ analytics: 'Track messages, delivery, leads and bookings.', numbers: 'Switch between business numbers or add another connection.', assistant: 'Your business knowledge, conversations and bookings, connected.', inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Manage app updates and connect your WhatsApp Business numbers.' }[tab]}</p></div>
 
-            {accounts.length > 0 && (
+            {tab === 'numbers' && (
                 <section className="rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">WhatsApp numbers</p>
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-sm font-medium" role="status">{accounts.length ? `Showing ${first + 1}–${Math.min(first + 20, accounts.length)} of ${accounts.length} numbers` : 'No numbers connected'}</p>
+                        <button type="button" className={btnClass} onClick={() => setTab('connect')}>Add a number</button>
+                    </div>
                     <div className="flex flex-col gap-2">
-                        {accounts.map((item) => (
+                        {accounts.slice(first, first + 20).map((item) => (
                             <div key={item.id} className={cn('flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3', item.isSelected ? 'bg-[#00685d] text-white' : 'bg-slate-50 text-slate-700')}>
-                                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => run(async () => { await axios.post('/api/admin/waba/accounts/select', { accountId: item.id }) })}>
+                                <button type="button" aria-pressed={item.isSelected} disabled={saving} className="min-w-0 flex-1 text-left" onClick={() => run(async () => { await axios.post('/api/admin/waba/accounts/select', { accountId: item.id }) })}>
                                     <p className="truncate text-sm font-semibold">{item.label || item.displayPhone || item.wabaId || 'WhatsApp number'}</p>
                                     <p className={cn('text-xs font-semibold', item.isSelected ? 'text-white/70' : 'text-slate-500')}>
                                         {item.connected ? `${item.displayName || 'Connected'} · ${item.phoneNumberId}` : item.pendingPhone ? 'Phone pending' : 'Not connected — delete if this number was removed in Meta'}
@@ -384,7 +399,11 @@ export function WabaBoard() {
                             </div>
                         ))}
                     </div>
-                    <p className="mt-3 text-xs font-semibold text-slate-500">Select a number to see its inbox, flows and templates. Connect with Meta again to add another number.</p>
+                    <nav aria-label="Number pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                        <button type="button" className={ghostClass} disabled={page === 0} onClick={() => setNumberPage(page - 1)}>Previous</button>
+                        <span className="text-sm text-slate-500">Page {page + 1} of {pageCount}</span>
+                        <button type="button" className={ghostClass} disabled={page + 1 === pageCount} onClick={() => setNumberPage(page + 1)}>Next</button>
+                    </nav>
                 </section>
             )}
 
@@ -399,13 +418,19 @@ export function WabaBoard() {
                 </p>
             )}
 
+            {tab === 'analytics' && <WabaAnalytics key={status.id} accountId={status.id} />}
+
+            {tab === 'assistant' && <WabaAssistant key={status.id} accountId={status.id} />}
+
             {tab === 'inbox' && (
-                <WabaInbox connected={status.connected} templates={templates} accountId={status.id} displayPhone={status.displayPhone} lastWebhookAt={status.lastWebhookAt} lastWebhookFields={status.lastWebhookFields} />
+                <WabaInbox key={status.id} connected={status.connected} templates={templates} accountId={status.id} displayPhone={status.displayPhone} lastWebhookAt={status.lastWebhookAt} lastWebhookFields={status.lastWebhookFields} />
             )}
 
             {tab === 'flows' && (
-                <WabaFlows templates={templates} accountId={status.id} />
+                <WabaFlows key={status.id} templates={templates} accountId={status.id} />
             )}
+
+            {tab === 'connect' && <WabaUpdates />}
 
             {tab === 'connect' && (
                 <div className="grid gap-6 lg:grid-cols-2">
@@ -452,7 +477,7 @@ export function WabaBoard() {
                         </Field>
                         <button type="button" className={btnClass} disabled={saving} onClick={connectWithMeta}>{status.connected || accounts.length ? 'Connect another number' : 'Connect with Meta'}</button>
                         <div className="grid gap-3">
-                            <Field label="Access token"><input className={inputClass} value={manual.accessToken} onChange={(e) => setManual({ ...manual, accessToken: e.target.value })} /></Field>
+                            <Field label="Access token"><input type="password" autoComplete="off" className={inputClass} value={manual.accessToken} onChange={(e) => setManual({ ...manual, accessToken: e.target.value })} /></Field>
                             <Field label="WABA ID"><input className={inputClass} value={manual.wabaId} onChange={(e) => setManual({ ...manual, wabaId: e.target.value })} /></Field>
                             <Field label="Phone number ID"><input className={inputClass} value={manual.phoneNumberId} onChange={(e) => setManual({ ...manual, phoneNumberId: e.target.value })} /></Field>
                         </div>

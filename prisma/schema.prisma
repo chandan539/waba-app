@@ -23,7 +23,7 @@ model WhatsAppAccount {
 model WhatsAppTemplate {
   id              String             @id @default(uuid())
   accountId       String?
-  metaId          String?            @unique
+  metaId          String?
   name            String
   language        String             @default("en")
   category        String             @default("UTILITY")
@@ -37,6 +37,7 @@ model WhatsAppTemplate {
   campaigns       WhatsAppCampaign[]
 
   @@index([accountId])
+  @@unique([accountId, metaId])
 }
 
 model WhatsAppCampaign {
@@ -139,4 +140,115 @@ model WhatsAppFlowStep {
   templateName  String
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+}
+
+
+model WhatsAppAssistantConfig {
+  accountId String @id
+  settings Json
+  updatedAt DateTime @updatedAt
+}
+
+model WhatsAppAssistantSession {
+  id String @id @default(uuid())
+  accountId String
+  phone String
+  state Json
+  handover Boolean @default(false)
+  lockUntil DateTime?
+  lockToken String?
+  updatedAt DateTime @updatedAt
+  @@unique([accountId, phone])
+}
+
+model WhatsAppLead {
+  id String @id @default(uuid())
+  accountId String
+  phone String
+  kind String
+  details Json
+  sourceId String @unique
+  createdAt DateTime @default(now())
+  @@index([accountId, createdAt])
+}
+
+model WhatsAppBookingSlot {
+  serviceId String @default("default")
+  id String @id @default(uuid())
+  accountId String
+  startsAt DateTime
+  endsAt DateTime
+  externalId String?
+  bookingId String?
+  reservedUntil DateTime?
+  createdAt DateTime @default(now())
+  @@unique([accountId, startsAt])
+  @@index([accountId, startsAt, reservedUntil])
+}
+
+model WhatsAppBooking {
+  id String @id @default(uuid())
+  accountId String
+  phone String
+  slotId String
+  sessionName String
+  startsAt DateTime
+  endsAt DateTime
+  status String @default("HELD")
+  mode String
+  amountMinor Int
+  currency String
+  expiresAt DateTime
+  paymentCancellationQueued Boolean @default(false)
+  paymentReference String?
+  paymentUrl String?
+  paymentId String? @unique
+  meetingUrl String?
+  calendarId String?
+  calendarSynced Boolean @default(false)
+  reminderQueued Boolean @default(false)
+  sourceId String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([accountId, status, startsAt])
+}
+
+model WhatsAppAssistantJob {
+  id String @id @default(uuid())
+  key String @unique
+  kind String
+  accountId String?
+  phone String?
+  payload Json
+  plan Json?
+  status String @default("PENDING")
+  attempts Int @default(0)
+  availableAt DateTime @default(now())
+  leaseUntil DateTime?
+  leaseToken String?
+  error String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, availableAt])
+}
+
+model WhatsAppAssistantDelivery {
+  key String @id
+  accountId String
+  phone String
+  payload Json
+  status String @default("SENDING")
+  metaMessageId String?
+  error String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([accountId, status])
+}
+
+model WhatsAppAiUsage {
+  id String @id @default(uuid())
+  accountId String
+  day String
+  calls Int @default(0)
+  @@unique([accountId, day])
 }

@@ -1,6 +1,6 @@
 {
   "name": "waba-app",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": false,
   "description": "Portable WhatsApp Cloud API module: inbox, templates, event flows, campaigns, and Meta webhook.",
   "license": "MIT",
@@ -8,12 +8,52 @@
   "exports": {
     "./lib/*": "./src/lib/*",
     "./routes/*": "./src/routes/*",
-    "./components/*": "./src/components/*"
+    "./components/*": "./src/components/*",
+    ".": "./src/index.ts"
   },
   "peerDependencies": {
     "axios": ">=1",
     "express": ">=4",
     "lucide-react": ">=0.300",
     "react": ">=18"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "test:integration": "vitest run src/lib/assistant.integration.test.ts",
+    "test:ui": "node scripts/ui-smoke.mjs",
+    "test:db:prepare": "node scripts/prepare-test-db.mjs",
+    "build:demo": "node scripts/build-demo.mjs"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@prisma/client": "^6.19.0",
+    "@tailwindcss/cli": "^4.3.4",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/supertest": "^6.0.3",
+    "esbuild": "^0.25.0",
+    "node-cron": "^4.2.0",
+    "prisma": "^6.19.0",
+    "react-dom": "^19.3.1",
+    "supertest": "^7.1.0",
+    "tailwindcss": "^4.3.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.5"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
   }
 }

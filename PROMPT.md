@@ -90,3 +90,8 @@ Inbound is webhook-only. Cloud API has no pull inbox.
 - Order/event code calls `triggerWhatsAppFlow` and the queue sends after Meta approves the template.
 
 ---
+
+
+## Business assistant integration (required for the complete module)
+
+Read `docs/ASSISTANT.md` and copy all assistant library, route and component files too. Merge every model in `prisma/schema.prisma`; apply `prisma/assistant.sql` after the original schema if using SQL; regenerate the host Prisma client. Run `processAssistantJobs()` every 2–5 seconds in a durable worker alongside the existing minute queue. Mount before JSON body parsers and require real admin authorization. Configure the host Tailwind source scan. The new AI assistant screen handles setup, business knowledge, menus, leads, bookings, handover and diagnostics. Defaults are disabled/TEST with no allowed phones; AI and booking are optional. Use server secrets for Claude, Razorpay and Google Calendar; see `src/examples/assistant-adapters.ts`. Never auto-enable live mode or submit templates during connection maintenance. No Python sidecar or local JSON data files are required.

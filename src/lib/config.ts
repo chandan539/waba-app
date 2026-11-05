@@ -1,7 +1,7 @@
 /** Host-app settings. Set these in .env — never commit secrets. */
 
 function env(name: string, fallback = '') {
-    return String(process.env[name] || fallback).trim()
+    return String((typeof process !== 'undefined' ? process.env[name] : undefined) || fallback).trim()
 }
 
 function stripSlash(value: string) {

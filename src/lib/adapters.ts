@@ -1,3 +1,5 @@
+import { webhookWabaUpdater, type WabaUpdateAdapter } from './wabaUpdates'
+import type { AssistantAdapters } from './assistantTypes'
 /**
  * Wire this module into the host app at boot:
  *
@@ -9,21 +11,30 @@ export type WabaAudienceRow = { phone: string; userEmail?: string | null }
 
 export type WabaAdapters = {
     prisma: any
+    assistant?: AssistantAdapters
+    updateWaba?: WabaUpdateAdapter
     requireAdmin?: (req: any, res: any, next: any) => void
     getAudiencePhones?: (audience: string) => Promise<WabaAudienceRow[]>
 }
 
+const unavailableAdmin: NonNullable<WabaAdapters['requireAdmin']> = (_req, res) =>
+    res.status(503).json({ error: 'WABA admin authentication adapter is required' })
+
 const state: WabaAdapters = {
     prisma: null,
-    requireAdmin: (_req, _res, next) => next(),
+    requireAdmin: unavailableAdmin,
     getAudiencePhones: async () => [],
 }
 
 export function setWabaAdapters(next: WabaAdapters) {
     if (!next?.prisma) throw new Error('setWabaAdapters({ prisma }) is required')
     state.prisma = next.prisma
-    if (next.requireAdmin) state.requireAdmin = next.requireAdmin
-    if (next.getAudiencePhones) state.getAudiencePhones = next.getAudiencePhones
+    const hook = process.env.WABA_UPDATE_HOOK_URL
+    const token = process.env.WABA_UPDATE_HOOK_TOKEN
+    state.updateWaba = next.updateWaba || (hook && token ? webhookWabaUpdater(hook, token) : undefined)
+    state.assistant = next.assistant || {}
+    state.requireAdmin = next.requireAdmin || unavailableAdmin
+    state.getAudiencePhones = next.getAudiencePhones || (async () => [])
 }
 
 export function getWabaPrisma() {
@@ -40,3 +51,7 @@ export function wabaRequireAdmin(req: any, res: any, next: any) {
 export async function hostAudiencePhones(audience: string) {
     return state.getAudiencePhones!(audience)
 }
+
+export function getAssistantAdapters(): AssistantAdapters { return state.assistant || {} }
+
+export function getWabaUpdater() { return state.updateWaba }

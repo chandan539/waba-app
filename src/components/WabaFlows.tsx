@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import axios from 'axios'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, Clock3, Loader2, MessageSquare, Plus, Trash2, Zap } from 'lucide-react'
 import { cn } from '../lib/cn'
-import { WABA_FLOW_TRIGGERS } from '../lib/waba'
+import { WABA_FLOW_TRIGGERS } from '../lib/wabaTriggers'
 
 const btnClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-[#00685d] px-4 text-sm font-semibold text-white disabled:opacity-50'
 const ghostClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-slate-100 px-4 text-sm font-semibold text-slate-700'
@@ -29,10 +29,15 @@ export function WabaFlows({
     const [activeId, setActiveId] = useState('')
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
+    const [edit, setEdit] = useState({ name: '', triggerType: 'ORDER_PLACED', isActive: false })
     const [form, setForm] = useState({ name: '', triggerType: 'ORDER_PLACED', isActive: false })
     const [stepForm, setStepForm] = useState({ sequenceOrder: 1, delayHours: 0, templateName: '' })
     const approved = templates.filter((item) => String(item.status).toUpperCase() === 'APPROVED')
     const active = flows.find((item) => item.id === activeId) || null
+    useEffect(() => {
+        if (active) setEdit({ name: active.name, triggerType: active.triggerType, isActive: active.isActive })
+        setStepForm({ sequenceOrder: Math.max(0, ...(active?.steps || []).map(step => step.sequenceOrder)) + 1, delayHours: 0, templateName: '' })
+    }, [active])
     const triggerLabel = (id: string) => WABA_FLOW_TRIGGERS.find((item) => item.id === id)?.label || id
 
     const load = async () => {
@@ -66,10 +71,10 @@ export function WabaFlows({
     }
 
     return (
-        <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
+        <div className="grid gap-6 xl:grid-cols-[19rem_minmax(0,1fr)]">
             <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6">
                 <h2 className="text-lg font-semibold text-slate-900">Event flows</h2>
-                <p className="text-sm text-slate-500">Same triggers as Email Flows. When the event fires and a phone is on the order or lead, these approved templates send on WhatsApp.</p>
+                <p className="text-sm text-slate-500">Create an automation for an event from your host app. Add approved templates and delays in the workflow builder.</p>
                 <input className={inputClass} placeholder="Flow name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 <select className={inputClass} value={form.triggerType} onChange={(e) => setForm({ ...form, triggerType: e.target.value })}>
                     {WABA_FLOW_TRIGGERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -93,7 +98,6 @@ export function WabaFlows({
                             type="button"
                             onClick={() => {
                                 setActiveId(item.id)
-                                setForm({ name: item.name, triggerType: item.triggerType, isActive: item.isActive })
                             }}
                             className={cn('w-full rounded-lg px-4 py-3 text-left', activeId === item.id ? 'bg-[#00685d] text-white' : 'bg-slate-50 text-slate-700')}
                         >
@@ -113,8 +117,8 @@ export function WabaFlows({
                                 <p className="text-sm font-semibold text-slate-500">{triggerLabel(active.triggerType)}</p>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                                <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => {
-                                    await axios.put(`/api/admin/waba/flows/${active.id}`, form)
+                                <button type="button" className={ghostClass} disabled={saving || !edit.name.trim()} onClick={() => run(async () => {
+                                    await axios.put(`/api/admin/waba/flows/${active.id}`, edit)
                                 })}>Save</button>
                                 <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => {
                                     if (!confirm('Delete this WhatsApp flow?')) return
@@ -122,10 +126,31 @@ export function WabaFlows({
                                 })}><Trash2 className="h-4 w-4" /></button>
                             </div>
                         </div>
-                        <div className="grid gap-3 md:grid-cols-[6rem_7rem_1fr_auto]">
-                            <input className={inputClass} type="number" min={1} value={stepForm.sequenceOrder} onChange={(e) => setStepForm({ ...stepForm, sequenceOrder: Number(e.target.value) })} />
-                            <input className={inputClass} type="number" min={0} value={stepForm.delayHours} onChange={(e) => setStepForm({ ...stepForm, delayHours: Number(e.target.value) })} />
-                            <select className={inputClass} value={stepForm.templateName} onChange={(e) => setStepForm({ ...stepForm, templateName: e.target.value })}>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="space-y-1 text-xs font-semibold">Workflow name<input className={inputClass} value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></label>
+                            <label className="space-y-1 text-xs font-semibold">Trigger<select className={inputClass} value={edit.triggerType} onChange={e => setEdit({ ...edit, triggerType: e.target.value })}>
+                                {WABA_FLOW_TRIGGERS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+                            </select></label>
+                            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={edit.isActive} onChange={e => setEdit({ ...edit, isActive: e.target.checked })} /> Active workflow</label>
+                        </div>
+                        <div className="space-y-2 rounded-xl border border-slate-200 bg-[#f7f9fc] p-4">
+                            <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-white p-3 text-sm"><Zap size={17} className="text-emerald-700" /><div><p className="text-xs text-slate-500">Trigger</p><strong>{triggerLabel(active.triggerType)}</strong></div></div>
+                            {active.steps.map(step => <div key={step.id}>
+                                <ArrowDown size={16} className="mx-auto my-2 text-slate-400" />
+                                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                                    <MessageSquare size={17} className="shrink-0 text-indigo-600" />
+                                    <div className="min-w-0 flex-1"><p className="flex items-center gap-1 text-xs text-slate-500"><Clock3 size={12} />{step.delayHours ? `After ${step.delayHours} hours` : 'Immediately'}</p><p className="break-words font-semibold">{step.templateName}</p></div>
+                                    <button type="button" aria-label={`Delete step ${step.sequenceOrder}`} className={ghostClass} disabled={saving} onClick={() => run(async () => {
+                                        if (confirm('Delete this step?')) await axios.delete(`/api/admin/waba/flow-steps/${step.id}`)
+                                    })}><Trash2 size={16} /></button>
+                                </div>
+                            </div>)}
+                            {!active.steps.length && <p className="p-3 text-sm text-slate-500">Add your first message step below.</p>}
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[5rem_6rem_minmax(0,1fr)_auto]">
+                            <input aria-label="Step order" className={inputClass} type="number" min={1} value={stepForm.sequenceOrder} onChange={(e) => setStepForm({ ...stepForm, sequenceOrder: Number(e.target.value) })} />
+                            <input aria-label="Delay in hours" className={inputClass} type="number" min={0} value={stepForm.delayHours} onChange={(e) => setStepForm({ ...stepForm, delayHours: Number(e.target.value) })} />
+                            <select aria-label="Step template" className={inputClass} value={stepForm.templateName} onChange={(e) => setStepForm({ ...stepForm, templateName: e.target.value })}>
                                 <option value="">Approved template</option>
                                 {approved.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
                             </select>
@@ -135,21 +160,6 @@ export function WabaFlows({
                             })}>Add step</button>
                         </div>
                         <p className="text-xs font-semibold text-slate-400">Order · delay hours · template. Delay 0 sends immediately on the event.</p>
-                        <div className="space-y-3">
-                            {active.steps.map((step) => (
-                                <div key={step.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-4 py-3">
-                                    <div>
-                                        <p className="text-sm font-semibold text-slate-900">Step {step.sequenceOrder} · {step.templateName}</p>
-                                        <p className="text-xs font-semibold text-slate-500">{step.delayHours === 0 ? 'Sends immediately' : `Sends after ${step.delayHours} hours`}</p>
-                                    </div>
-                                    <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => {
-                                        if (!confirm('Delete this step?')) return
-                                        await axios.delete(`/api/admin/waba/flow-steps/${step.id}`)
-                                    })}><Trash2 className="h-4 w-4" /></button>
-                                </div>
-                            ))}
-                            {!active.steps.length && <p className="rounded-lg bg-slate-50 p-6 text-sm font-semibold text-slate-400">Add a template step. Submit and approve templates in the Templates tab first.</p>}
-                        </div>
                     </>
                 ) : (
                     <p className="p-8 text-sm font-semibold text-slate-400">Create a flow, then attach approved templates to the event.</p>

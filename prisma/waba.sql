@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS "WhatsAppTemplate" (
   "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "WhatsAppTemplate_pkey" PRIMARY KEY ("id")
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "WhatsAppTemplate_metaId_key" ON "WhatsAppTemplate"("metaId");
+DROP INDEX IF EXISTS "WhatsAppTemplate_metaId_key";
+CREATE UNIQUE INDEX IF NOT EXISTS "WhatsAppTemplate_accountId_metaId_key" ON "WhatsAppTemplate"("accountId", "metaId");
 CREATE INDEX IF NOT EXISTS "WhatsAppTemplate_accountId_idx" ON "WhatsAppTemplate"("accountId");
 
 CREATE TABLE IF NOT EXISTS "WhatsAppCampaign" (

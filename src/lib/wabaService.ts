@@ -1,3 +1,4 @@
+import { enqueueAssistantJob } from './assistantStore'
 import { getWabaPrisma, hostAudiencePhones } from './adapters'
 import { resolveWabaWebhookUrl } from './config'
 import {
@@ -33,7 +34,8 @@ function jsonField(value: unknown) {
 export async function getWabaAccount(accountId?: string | null) {
     if (accountId) {
         const exact = await prisma.whatsAppAccount.findUnique({ where: { id: String(accountId) } })
-        if (exact) return exact
+        if (!exact) throw new Error('WhatsApp account not found')
+        return exact
     }
     return (
         await prisma.whatsAppAccount.findFirst({ where: { isSelected: true } })
@@ -42,7 +44,7 @@ export async function getWabaAccount(accountId?: string | null) {
 }
 
 export async function listWabaAccounts() {
-    return prisma.whatsAppAccount.findMany({ orderBy: [{ isSelected: 'desc' }, { connectedAt: 'desc' }, { updatedAt: 'desc' }] })
+    return prisma.whatsAppAccount.findMany({ orderBy: [{ connectedAt: 'desc' }, { id: 'asc' }] })
 }
 
 export async function getWabaSettings() {
@@ -67,8 +69,11 @@ function settingsPayload(source?: Record<string, any> | null) {
 export async function selectWabaAccount(accountId: string) {
     const account = await prisma.whatsAppAccount.findUnique({ where: { id: String(accountId || '') } })
     if (!account) throw new Error('WhatsApp number not found')
-    await prisma.whatsAppAccount.updateMany({ data: { isSelected: false } })
-    return prisma.whatsAppAccount.update({ where: { id: account.id }, data: { isSelected: true } })
+    return prisma.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('wabix-account-selection'))")
+        await tx.whatsAppAccount.updateMany({ where: { isSelected: true }, data: { isSelected: false } })
+        return tx.whatsAppAccount.update({ where: { id: account.id }, data: { isSelected: true } })
+    })
 }
 
 export async function upsertWabaAccount(data: Record<string, unknown>, accountId?: string | null) {
@@ -86,7 +91,7 @@ export function wabaWebhookUrl() {
 
 export async function wabaPublicStatus(accountId?: string | null) {
     const [selected, accounts] = await Promise.all([getWabaAccount(accountId), listWabaAccounts()])
-    const settings = accounts.find((item) => item.metaAppId || item.metaAppSecret || item.verifyToken) || selected
+    const settings = accounts.find((item: any) => item.metaAppId || item.metaAppSecret || item.verifyToken) || selected
     let phoneMeta: Record<string, string> = {}
     let health: { nameStatus?: string; accountMode?: string; canSendMessage?: string; healthError?: string; reviewStatus?: string } = {}
     if (selected?.accessToken && selected.phoneNumberId) {
@@ -130,8 +135,8 @@ export async function wabaPublicStatus(accountId?: string | null) {
         }, wabaWebhookUrl()),
         ...health,
         accounts: accounts
-            .map((item) => publicWabaAccount(item))
-            .filter((item) => item.connected || item.pendingPhone || item.wabaId || item.phoneNumberId),
+            .map((item: any) => publicWabaAccount(item))
+            .filter((item: any) => item.connected || item.pendingPhone || item.wabaId || item.phoneNumberId),
     }
 }
 
@@ -212,24 +217,25 @@ export async function saveConnectedWaba(input: {
     const settings = await getWabaSettings()
     const phoneNumberId = String(input.phoneNumberId || '').trim()
     const wabaId = String(input.wabaId || '').trim()
-    const existing = await prisma.whatsAppAccount.findFirst({
-        where: phoneNumberId
-            ? { OR: [{ phoneNumberId }, { wabaId }] }
-            : { wabaId },
+    const account = await prisma.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('wabix-account-selection'))")
+        const exact = phoneNumberId ? await tx.whatsAppAccount.findFirst({ where: { phoneNumberId } }) : null
+        const pending = exact ? null : await tx.whatsAppAccount.findFirst({ where: { wabaId, phoneNumberId: null } })
+        const existing = exact || pending
+        await tx.whatsAppAccount.updateMany({ where: { isSelected: true }, data: { isSelected: false } })
+        const data = {
+            ...settingsPayload(settings),
+            accessToken: input.accessToken,
+            wabaId,
+            phoneNumberId: phoneNumberId || null,
+            businessId: input.businessId || null,
+            connectedAt: new Date(),
+            isSelected: true,
+        }
+        return existing
+            ? tx.whatsAppAccount.update({ where: { id: existing.id }, data: data })
+            : tx.whatsAppAccount.create({ data })
     })
-    await prisma.whatsAppAccount.updateMany({ data: { isSelected: false } })
-    const data = {
-        ...settingsPayload(settings),
-        accessToken: input.accessToken,
-        wabaId,
-        phoneNumberId: phoneNumberId || null,
-        businessId: input.businessId || null,
-        connectedAt: new Date(),
-        isSelected: true,
-    }
-    const account = existing
-        ? await prisma.whatsAppAccount.update({ where: { id: existing.id }, data })
-        : await prisma.whatsAppAccount.create({ data })
     await subscribeAndRefresh({ pin: input.pin, accountId: account.id })
     return wabaPublicStatus(account.id)
 }
@@ -362,12 +368,18 @@ export async function subscribeAndRefresh(opts?: { pin?: string; accountId?: str
     return wabaPublicStatus(account.id)
 }
 
+async function unsubscribeIfLastNumber(account: { id: string; wabaId?: string | null; accessToken?: string | null }) {
+    if (!account.wabaId || !account.accessToken) return
+    const other = await prisma.whatsAppAccount.count({
+        where: { id: { not: account.id }, wabaId: account.wabaId, accessToken: { not: null } },
+    })
+    if (!other) await graphFetch(`/${account.wabaId}/subscribed_apps`, account.accessToken, { method: 'DELETE' }).catch(() => null)
+}
+
 export async function disconnectWaba(accountId?: string | null) {
     const account = await getWabaAccount(accountId)
-    if (account?.wabaId && account.accessToken) {
-        await graphFetch(`/${account.wabaId}/subscribed_apps`, account.accessToken, { method: 'DELETE' }).catch(() => null)
-    }
     if (account) {
+        await unsubscribeIfLastNumber(account)
         await upsertWabaAccount({
             accessToken: null,
             wabaId: null,
@@ -385,10 +397,12 @@ export async function disconnectWaba(accountId?: string | null) {
 export async function deleteWabaAccount(accountId: string) {
     const account = await prisma.whatsAppAccount.findUnique({ where: { id: String(accountId || '') } })
     if (!account) throw new Error('WhatsApp number not found')
-    if (account.wabaId && account.accessToken) {
-        await graphFetch(`/${account.wabaId}/subscribed_apps`, account.accessToken, { method: 'DELETE' }).catch(() => null)
-    }
+    await unsubscribeIfLastNumber(account)
     const id = account.id
+    for (const model of ['whatsAppAssistantConfig', 'whatsAppAssistantSession', 'whatsAppLead', 'whatsAppBookingSlot', 'whatsAppBooking', 'whatsAppAssistantDelivery', 'whatsAppAiUsage']) {
+        await prisma[model].deleteMany({ where: { accountId: id } })
+    }
+    await prisma.whatsAppAssistantJob.deleteMany({ where: { accountId: id } })
     const settings = settingsPayload(await getWabaSettings())
     await prisma.whatsAppQueue.deleteMany({ where: { accountId: id } }).catch(() => null)
     await prisma.whatsAppCampaign.deleteMany({ where: { accountId: id } }).catch(() => null)
@@ -533,7 +547,7 @@ export async function syncWabaTemplates() {
         const bodyText = String(bodyComponent?.text || '')
         const data = {
             accountId: account.id,
-            metaId: String(item.id || ''),
+            metaId: item.id ? String(item.id) : null,
             name,
             language,
             category: String(item.category || 'UTILITY'),
@@ -547,7 +561,7 @@ export async function syncWabaTemplates() {
                 accountId: account.id,
                 OR: [
                     ...(data.metaId ? [{ metaId: data.metaId }] : []),
-                    { name },
+                    { name, language },
                 ],
             },
             orderBy: { updatedAt: 'desc' },
@@ -575,8 +589,8 @@ async function findApprovedWabaTemplate(name: string, accountId?: string | null)
         where: { status: 'APPROVED' },
         orderBy: { updatedAt: 'desc' },
     })
-    const matches = rows.filter((row) => row.name.toLowerCase() === wanted)
-    return matches.find((row) => accountId && row.accountId === accountId) || matches[0] || null
+    const matches = rows.filter((row: any) => row.name.toLowerCase() === wanted)
+    return (accountId ? matches.find((row: any) => row.accountId === accountId) : matches[0]) || null
 }
 
 let lastWabaMaintain = 0
@@ -665,6 +679,7 @@ export async function sendWabaTemplate(input: {
     templateName: string
     language?: string
     params?: string[]
+    context?: Record<string, unknown>
     accountId?: string | null
 }) {
     const account = await requireConnectedAccount(input.accountId)
@@ -676,10 +691,12 @@ export async function sendWabaTemplate(input: {
         where: { name: input.templateName, accountId: account.id },
         orderBy: { updatedAt: 'desc' },
     }).catch(() => null)
+    if (!stored || String(stored.status).toUpperCase() !== 'APPROVED') throw new Error('Only approved templates can be sent')
     const keys = Array.isArray(stored?.variableKeys) ? stored.variableKeys as string[] : []
     const params = keys.length
         ? templateParamsFromContext(keys, {
-            name: input.params?.[0],
+            ...input.context,
+            name: input.context?.name || input.params?.[0],
             email: input.params?.[1],
             phone,
             ...(input.params || []).reduce((acc, value, index) => ({ ...acc, [String(index + 1)]: value }), {}),
@@ -739,11 +756,12 @@ export async function recordWabaMessage(input: {
     const accountId = account?.id || input.accountId || null
     const body = String(input.body || '').trim() || `[${input.type || 'text'}]`
     const createdAt = input.createdAt || new Date()
+    return prisma.$transaction(async (tx: any) => {
     if (input.metaMessageId) {
-        const existing = await prisma.whatsAppMessage.findUnique({ where: { metaMessageId: input.metaMessageId } }).catch(() => null)
+        const existing = await tx.whatsAppMessage.findUnique({ where: { metaMessageId: input.metaMessageId } }).catch(() => null)
         if (existing) return existing
     }
-    const message = await prisma.whatsAppMessage.create({
+    const message = await tx.whatsAppMessage.create({
         data: {
             accountId,
             phone,
@@ -760,7 +778,7 @@ export async function recordWabaMessage(input: {
     })
     const preview = body.slice(0, 180)
     const inbound = input.direction === 'INBOUND'
-    await prisma.whatsAppContact.upsert({
+    await tx.whatsAppContact.upsert({
         where: { accountId_phone: { accountId: accountId || '', phone } },
         create: {
             accountId,
@@ -785,6 +803,7 @@ export async function recordWabaMessage(input: {
         },
     })
     return message
+    })
 }
 
 export async function listWabaConversations(accountId?: string | null) {
@@ -796,7 +815,7 @@ export async function listWabaConversations(accountId?: string | null) {
         orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
         take: 80,
     })
-    const withMessages = contacts.filter((row) => row.lastMessageAt || row.lastInboundAt || row.lastMessage)
+    const withMessages = contacts.filter((row: any) => row.lastMessageAt || row.lastInboundAt || row.lastMessage)
     if (withMessages.length) return withMessages
     const messages = await prisma.whatsAppMessage.findMany({
         where: scopedWhere,
@@ -1108,7 +1127,7 @@ export async function applyWabaWebhook(payload: any) {
                 const status = String(value.event || value.message_template_status || '').toUpperCase()
                 if (metaId || name) {
                     await prisma.whatsAppTemplate.updateMany({
-                        where: metaId ? { metaId } : { name },
+                        where: { ...(metaId ? { metaId } : { name }), accountId: { in: (await prisma.whatsAppAccount.findMany({ where: { wabaId: String(entry.id || '') }, select: { id: true } })).map((account: any) => account.id) } },
                         data: {
                             status: status.replace('TEMPLATE_', '') || status,
                             rejectionReason: value.reason ? String(value.reason) : undefined,
@@ -1121,9 +1140,10 @@ export async function applyWabaWebhook(payload: any) {
             const hasHistory = field === 'history' || Array.isArray(value.history)
             if (field === 'messages' || field === 'smb_message_echoes' || field === 'history' || hasInbound || hasEchoes || hasHistory) {
                 const phoneNumberId = String(value.metadata?.phone_number_id || '').trim()
-                const inboundAccount = (phoneNumberId
-                    ? await prisma.whatsAppAccount.findFirst({ where: { phoneNumberId } })
-                    : null) || await getWabaAccount()
+                const inboundAccount = phoneNumberId
+                    ? await prisma.whatsAppAccount.findFirst({ where: { phoneNumberId, wabaId: String(entry.id || '') } })
+                    : null
+                if (!inboundAccount) continue
                 const parsed = parseWabaWebhookMessages({ entry: [{ changes: [change] }] })
                 if ((hasInbound || hasEchoes) && !parsed.length) {
                     const first = value.messages?.[0] || value.message_echoes?.[0] || {}
@@ -1138,7 +1158,7 @@ export async function applyWabaWebhook(payload: any) {
                 }
                 for (const inbound of parsed) {
                     await recordWabaMessage({
-                        accountId: inboundAccount?.id || inboundAccount?.id || null,
+                        accountId: inboundAccount.id,
                         phone: inbound.phone,
                         direction: inbound.direction || 'INBOUND',
                         type: inbound.type,
@@ -1148,7 +1168,10 @@ export async function applyWabaWebhook(payload: any) {
                         status: inbound.direction === 'OUTBOUND' ? 'sent' : 'received',
                         raw: inbound.raw,
                         createdAt: inbound.timestamp,
-                    }).catch((error: any) => console.error('WABA_INBOUND_STORE', error?.message || error))
+                    })
+                    if (field === 'messages' && inbound.direction !== 'OUTBOUND' && inbound.metaMessageId && inbound.timestamp && Date.now() - +inbound.timestamp < 24 * 3600000) {
+                        await enqueueAssistantJob(`inbound:${inbound.metaMessageId}`, 'INBOUND', { text: inbound.body, type: inbound.type, raw: inbound.raw }, inboundAccount.id, inbound.phone)
+                    }
                 }
                 const statuses = Array.isArray(value.statuses) ? value.statuses : []
                 for (const item of statuses) {
