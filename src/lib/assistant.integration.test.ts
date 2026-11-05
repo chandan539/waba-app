@@ -498,4 +498,37 @@ describe.skipIf(!databaseUrl)('assistant with real Postgres and mocked external 
         expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 
+    it('paginates all stored contacts in batches of 20 and searches beyond the first page', async () => {
+        await prisma.whatsAppContact.createMany({ data: Array.from({ length: 44 }, (_, i) => ({
+            accountId, phone: `919123450${String(i).padStart(3, '0')}`,
+            displayName: `Customer ${i}`, lastMessageAt: new Date(Date.now() - i * 86400000),
+        })) })
+        await prisma.whatsAppMessage.create({ data: {
+            accountId, phone: '919123459999', direction: 'INBOUND', body: 'Legacy import',
+            createdAt: new Date(Date.now() - 60 * 86400000),
+        } })
+        const pages = await Promise.all([1, 2, 3].map(page =>
+            request(app).get('/waba/inbox').query({ accountId, page }).expect(200),
+        ))
+        expect(pages.map(result => result.body.conversations.length)).toEqual([20, 20, 5])
+        expect(pages.map(result => result.body.hasNext)).toEqual([true, true, false])
+        expect(new Set(pages.flatMap(result => result.body.conversations.map((row: any) => row.id))).size).toBe(45)
+        const match = await request(app).get('/waba/inbox').query({ accountId, search: 'legacy import' }).expect(200)
+        expect(match.body.conversations).toEqual([expect.objectContaining({ lastMessage: 'Legacy import' })])
+    })
+
+    it('loads older history without a date limit and keeps equal timestamps paginated correctly', async () => {
+        const date = new Date(Date.now() - 45 * 86400000)
+        await prisma.whatsAppMessage.createMany({ data: Array.from({ length: 117 }, (_, i) => ({
+            id: `history-${String(i).padStart(3, '0')}`, accountId, phone, direction: 'INBOUND', body: `Message ${i}`, createdAt: date,
+        })) })
+        const first = await request(app).get(`/waba/inbox/${phone}`).query({ accountId }).expect(200)
+        const second = await request(app).get(`/waba/inbox/${phone}`).query({ accountId, before: first.body.olderCursor }).expect(200)
+        const third = await request(app).get(`/waba/inbox/${phone}`).query({ accountId, before: second.body.olderCursor }).expect(200)
+        expect([first, second, third].map(result => result.body.messages.length)).toEqual([50, 50, 17])
+        expect(third.body.olderCursor).toBeNull()
+        expect(third.body.messages[0].body).toBe('Message 0')
+        expect(new Set([first, second, third].flatMap(result => result.body.messages.map((row: any) => row.id))).size).toBe(117)
+    })
+
 })

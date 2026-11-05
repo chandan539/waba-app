@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import { Download, FileText, Loader2, Search, MessageSquare, UserRound } from 'lucide-react'
 import { cn } from '../lib/cn'
@@ -80,8 +80,14 @@ function InboxThreads({
 }: InboxProps & { all: boolean; numbers: InboxNumber[] }) {
     const [search, setSearch] = useState('')
     const [unreadOnly, setUnreadOnly] = useState(false)
+    const [page, setPage] = useState(1)
+    const [hasNext, setHasNext] = useState(false)
+    const [listBusy, setListBusy] = useState(true)
+    const listKey = JSON.stringify([accountId, all, search, unreadOnly, page])
+    const activeListKey = useRef(listKey)
+    activeListKey.current = listKey
     const [conversations, setConversations] = useState<Conversation[]>([])
-    const [thread, setThread] = useState<{ phone: string; accountId?: string | null }>()
+    const [thread, setThread] = useState<{ phone: string; accountId?: string | null; displayName?: string | null }>()
     const threadIdentity = useRef('')
     const activePhone = thread?.phone || ''
     const receivingId = thread?.accountId || accountId
@@ -94,6 +100,11 @@ function InboxThreads({
         return number ? numberLabel(number) : displayPhone || 'Business number'
     }
     const [messages, setMessages] = useState<Message[]>([])
+    const [olderCursor, setOlderCursor] = useState<string | null>(null)
+    const [loadingOlder, setLoadingOlder] = useState(false)
+    const [historyError, setHistoryError] = useState('')
+    const didLoadThread = useRef(false)
+    const scrollIntent = useRef<{ top: number; height: number } | 'bottom' | null>(null)
     const [canReply, setCanReply] = useState(false)
     const [draft, setDraft] = useState('')
     const [templateId, setTemplateId] = useState('')
@@ -106,8 +117,17 @@ function InboxThreads({
     const chosenTemplate = approved.some(item => item.id === templateId) ? templateId : approved[0]?.id || ''
 
     const loadInbox = async () => {
-        const res = await axios.get('/api/admin/waba/inbox', { params: { accountId, ...(all ? { scope: 'all' } : {}) } })
-        setConversations(res.data.conversations || [])
+        const res = await axios.get('/api/admin/waba/inbox', {
+            params: { accountId, ...(all ? { scope: 'all' } : {}), page, search, unread: unreadOnly },
+        })
+        if (activeListKey.current !== listKey) return
+        const rows = res.data.conversations || []
+        if (!rows.length && page > 1) {
+            setPage(page - 1)
+            return
+        }
+        setConversations(rows)
+        setHasNext(Boolean(res.data.hasNext))
         setNumberTemplates(res.data.templates)
     }
 
@@ -116,7 +136,20 @@ function InboxThreads({
         const key = `${id || ''}:${phone}`
         const res = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(phone)}`, { params: { accountId: id } })
         if (threadIdentity.current !== key) return
-        setMessages(res.data.messages || [])
+        const incoming: Message[] = res.data.messages || []
+        const pane = threadRef.current
+        const firstLoad = !didLoadThread.current
+        if (firstLoad || (pane && pane.scrollHeight - pane.scrollTop - pane.clientHeight < 48)) {
+            if (!scrollIntent.current) scrollIntent.current = 'bottom'
+        }
+        if (firstLoad) setOlderCursor(res.data.olderCursor || null)
+        didLoadThread.current = true
+        setMessages(previous => {
+            const ids = new Set(incoming.map(item => item.id))
+            // Preserve pages already loaded and refresh the latest message statuses.
+            const earlier = previous.filter(item => !ids.has(item.id))
+            return [...earlier, ...incoming]
+        })
         setThreadTemplates(res.data.templates)
         setCanReply(!!res.data.canReply)
         if ((res.data.contact?.unreadCount || 0) > 0) {
@@ -125,13 +158,46 @@ function InboxThreads({
         }
     }
 
+    async function loadOlder() {
+        if (!olderCursor || !activePhone || loadingOlder) return
+        const key = threadIdentity.current
+        setLoadingOlder(true)
+        setHistoryError('')
+        try {
+            const { data } = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(activePhone)}`, {
+                params: { accountId: receivingId, before: olderCursor },
+            })
+            if (threadIdentity.current !== key) return
+            const pane = threadRef.current
+            if (pane) scrollIntent.current = { top: pane.scrollTop, height: pane.scrollHeight }
+            setMessages(previous => {
+                const ids = new Set(previous.map(item => item.id))
+                return [...(data.messages || []).filter((item: Message) => !ids.has(item.id)), ...previous]
+            })
+            setOlderCursor(data.olderCursor || null)
+        } catch {
+            if (threadIdentity.current === key) setHistoryError('Could not load older messages. Try again.')
+        } finally {
+            if (threadIdentity.current === key) setLoadingOlder(false)
+        }
+    }
+
+    useEffect(() => () => { threadIdentity.current = '' }, [])
+
     useEffect(() => {
-        threadIdentity.current = ''
-        setThread(undefined)
-        setMessages([])
-        loadInbox().catch(() => setError('Could not load conversations.')).finally(() => setLoading(false))
-        return () => { threadIdentity.current = '' }
-    }, [accountId, all])
+        setListBusy(true)
+        const timer = window.setTimeout(() => {
+            loadInbox()
+                .catch(() => { if (activeListKey.current === listKey) setError('Could not load conversations.') })
+                .finally(() => {
+                    if (activeListKey.current === listKey) {
+                        setListBusy(false)
+                        setLoading(false)
+                    }
+                })
+        }, search ? 200 : 0)
+        return () => window.clearTimeout(timer)
+    }, [listKey])
 
     useEffect(() => {
         const timer = window.setInterval(() => {
@@ -139,19 +205,26 @@ function InboxThreads({
             if (activePhone) loadThread(activePhone).catch(() => null)
         }, 8000)
         return () => window.clearInterval(timer)
-    }, [activePhone, receivingId, accountId, all])
+    }, [activePhone, receivingId, listKey])
 
-    useEffect(() => {
-        threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight })
-    }, [messages.length])
+    useLayoutEffect(() => {
+        const pane = threadRef.current
+        const intent = scrollIntent.current
+        scrollIntent.current = null
+        if (pane && intent) pane.scrollTop = intent === 'bottom' ? pane.scrollHeight : intent.top + pane.scrollHeight - intent.height
+    }, [messages])
 
-    const openThread = async (phone: string, id = accountId) => {
+    const openThread = async (phone: string, id = accountId, displayName?: string | null) => {
         threadIdentity.current = `${id || ''}:${phone}`
-        setThread({ phone, accountId: id })
+        didLoadThread.current = false
+        setThread({ phone, accountId: id, displayName })
         setDraft('')
         setError('')
         setAttachmentError('')
         setMessages([])
+        setOlderCursor(null)
+        setLoadingOlder(false)
+        setHistoryError('')
         setThreadTemplates(undefined)
         setCanReply(false)
         await loadThread(phone, id).catch(() => {
@@ -208,10 +281,8 @@ function InboxThreads({
         try {
             await axios.post('/api/admin/waba/inbox/template', { phone, templateId: id, accountId: receivingId })
             setTemplateId(id)
-            threadIdentity.current = `${receivingId || ''}:${phone}`
-            setThread({ phone, accountId: receivingId })
             setNewPhone('')
-            await Promise.all([loadThread(phone), loadInbox()])
+            await Promise.all([phone === activePhone ? loadThread(phone) : openThread(phone, receivingId), loadInbox()])
         } catch (err: any) {
             setError(err.response?.data?.error || err.message || 'Could not send template')
         } finally {
@@ -236,18 +307,18 @@ function InboxThreads({
                     <p className="text-base font-semibold text-slate-900">Conversations</p>
                     <button type="button" className="text-xs font-semibold text-[#00685d]" onClick={() => loadInbox().catch(() => null)}>Refresh</button>
                 </div>
-                <div className="space-y-3 px-4 pb-4"><label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"><Search size={16} className="shrink-0 text-slate-400" /><input aria-label="Search conversations" className="min-w-0 w-full bg-transparent text-sm outline-none" placeholder="Search conversations…" value={search} onChange={e => setSearch(e.target.value)} /></label><div className="flex gap-2">{[false, true].map(unread => <button key={String(unread)} type="button" aria-pressed={unreadOnly === unread} onClick={() => setUnreadOnly(unread)} className={cn('rounded-full px-3 py-1 text-xs font-medium', unreadOnly === unread ? 'bg-[#00685d] text-white' : 'bg-slate-100 text-slate-600')}>{unread ? 'Unread' : 'All chats'}</button>)}</div></div>
+                <div className="space-y-3 px-4 pb-4"><label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"><Search size={16} className="shrink-0 text-slate-400" /><input aria-label="Search conversations" className="min-w-0 w-full bg-transparent text-sm outline-none" placeholder="Search conversations…" value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} /></label><div className="flex gap-2">{[false, true].map(unread => <button key={String(unread)} type="button" aria-pressed={unreadOnly === unread} onClick={() => { setUnreadOnly(unread); setPage(1) }} className={cn('rounded-full px-3 py-1 text-xs font-medium', unreadOnly === unread ? 'bg-[#00685d] text-white' : 'bg-slate-100 text-slate-600')}>{unread ? 'Unread' : 'All chats'}</button>)}</div></div>
                 {!all && !lastWebhookAt && (
                     <p className="mx-4 mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
                         Meta is not delivering inbound webhooks yet. Replies must go to {displayPhone || 'the Cloud API number'}. In Facebook Developer, switch App Mode to <span className="font-semibold">Live</span>, then reply once from a personal WhatsApp.
                     </p>
                 )}
                 <div className="max-h-[22rem] overflow-y-auto lg:max-h-[36rem]">
-                    {conversations.filter(item => (!unreadOnly || (item.unreadCount || 0) > 0) && `${item.displayName || ''} ${item.phone} ${item.lastMessage || ''}`.toLowerCase().includes(search.toLowerCase())).map((item) => (
+                    {(listBusy ? [] : conversations).map((item) => (
                         <button
                             key={item.id}
                             type="button"
-                            disabled={saving} onClick={() => openThread(item.phone, item.accountId || accountId)}
+                            disabled={saving} onClick={() => openThread(item.phone, item.accountId || accountId, item.displayName)}
                             className={cn('flex w-full flex-col gap-1 border-t border-slate-50 px-4 py-3 text-left', active?.id === item.id ? 'border-l-4 border-l-[#00685d] bg-emerald-50' : 'hover:bg-slate-50')}
                         >
                             <div className="flex items-center justify-between gap-2"><span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-800">{(item.displayName || item.phone).slice(0, 2).toUpperCase()}</span>
@@ -261,7 +332,9 @@ function InboxThreads({
                             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{formatWhen(item.lastMessageAt)}</p>
                         </button>
                     ))}
-                    {!conversations.length && (
+                    {listBusy && <p role="status" className="px-4 py-6 text-sm text-slate-500">Loading contacts…</p>}
+                    {!listBusy && !conversations.length && (search || unreadOnly) && <p className="px-4 py-6 text-sm text-slate-500">No contacts match this filter.</p>}
+                    {!listBusy && !conversations.length && !search && !unreadOnly && (
                         <p className="px-4 py-8 text-sm font-semibold text-slate-500">
                             {all ? 'No inbound chats across the connected numbers. ' : 'No inbound chats yet. Reply must come to '} {!all && <span className="font-semibold text-slate-900">{displayPhone || 'the Cloud API number'}</span>}
                             {all ? '' : lastWebhookAt ? ` · last Meta webhook ${formatWhen(lastWebhookAt)}${lastWebhookFields ? ` (${lastWebhookFields})` : ''}` : ' · Meta has not delivered a customer message webhook yet'}
@@ -269,16 +342,25 @@ function InboxThreads({
                         </p>
                     )}
                 </div>
+                <nav aria-label="Contact pages" className="flex items-center justify-between gap-2 border-t border-slate-200 p-3">
+                    <button type="button" className="rounded border border-slate-200 px-2 py-1 text-xs disabled:opacity-40" disabled={page === 1 || listBusy} onClick={() => setPage(page - 1)}>Previous</button>
+                    <span className="text-xs text-slate-500" aria-live="polite">Page {page}</span>
+                    <button type="button" className="rounded border border-slate-200 px-2 py-1 text-xs disabled:opacity-40" disabled={!hasNext || listBusy} onClick={() => setPage(page + 1)}>Next</button>
+                </nav>
             </aside>
             <section className="flex min-h-[24rem] min-w-0 flex-col">
                 {activePhone ? (
                     <>
                         <div className="border-b border-slate-200 px-5 py-4">
-                            <p className="font-semibold text-slate-900">{active?.displayName || activePhone}</p>
+                            <p className="font-semibold text-slate-900">{active?.displayName || thread?.displayName || activePhone}</p>
                             <p className="mt-1 text-xs font-medium text-[#00685d]">Business number · {businessName(receivingId)}</p>
                             <p className="text-xs font-semibold text-slate-500">{activePhone}{active?.optedOut ? ' · opted out' : canReply ? ' · 24-hour window open' : ' · send a template to restart'}</p>
                         </div>
                         <div ref={threadRef} className="max-h-[34rem] flex-1 space-y-3 overflow-y-auto bg-slate-50 p-5">
+                            {olderCursor && <div className="text-center">
+                                <button type="button" className={ghostClass} disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? 'Loading…' : 'Load older messages'}</button>
+                            </div>}
+                            {historyError && <p role="alert" className="text-sm text-rose-700">{historyError}</p>}
                             {messages.map((item) => (
                                 <div key={item.id} className={cn('max-w-[80%] rounded-lg px-4 py-3 text-sm font-semibold', item.direction === 'OUTBOUND' ? 'ml-auto bg-[#00685d] text-white' : 'bg-white text-slate-800 shadow-sm')}>
                                     {item.body && item.body !== '[contacts]' && !/^\[(image|audio|video|sticker|document)\]$/.test(item.body) && <p className="whitespace-pre-wrap break-words">{item.body}</p>}
@@ -343,7 +425,7 @@ function InboxThreads({
                     </div>
                 )}
             </section>
-            <aside className="hidden border-l border-slate-200 bg-[#f2f4f7] p-4 xl:block"><h3 className="border-b border-slate-200 pb-4 text-sm font-semibold">Contact details</h3>{activePhone ? <div className="mt-6 space-y-5"><div className="text-center"><span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#00685d] text-xl font-semibold text-white">{(active?.displayName || activePhone).slice(0, 2).toUpperCase()}</span><p className="mt-3 break-words font-semibold">{active?.displayName || 'Customer'}</p><p className="mt-1 text-xs text-slate-500">{activePhone}</p></div><div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 text-xs"><p className="text-slate-500">Channel <span className="float-right text-[#00685d]">WhatsApp</span></p><p className="text-slate-500">Reply window</p><p className="font-medium">{canReply ? 'Open · replies available' : 'Closed · template required'}</p><p className="border-t border-slate-100 pt-3 text-slate-500">{active?.optedOut ? 'This contact has opted out.' : 'Use approved templates to start a conversation.'}</p></div></div> : <div className="mt-12 text-center text-sm text-slate-500"><UserRound className="mx-auto mb-3" size={30} />Select a conversation to view contact details.</div>}</aside>
+            <aside className="hidden border-l border-slate-200 bg-[#f2f4f7] p-4 xl:block"><h3 className="border-b border-slate-200 pb-4 text-sm font-semibold">Contact details</h3>{activePhone ? <div className="mt-6 space-y-5"><div className="text-center"><span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#00685d] text-xl font-semibold text-white">{(active?.displayName || thread?.displayName || activePhone).slice(0, 2).toUpperCase()}</span><p className="mt-3 break-words font-semibold">{active?.displayName || thread?.displayName || 'Customer'}</p><p className="mt-1 text-xs text-slate-500">{activePhone}</p></div><div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 text-xs"><p className="text-slate-500">Channel <span className="float-right text-[#00685d]">WhatsApp</span></p><p className="text-slate-500">Reply window</p><p className="font-medium">{canReply ? 'Open · replies available' : 'Closed · template required'}</p><p className="border-t border-slate-100 pt-3 text-slate-500">{active?.optedOut ? 'This contact has opted out.' : 'Use approved templates to start a conversation.'}</p></div></div> : <div className="mt-12 text-center text-sm text-slate-500"><UserRound className="mx-auto mb-3" size={30} />Select a conversation to view contact details.</div>}</aside>
         </div>
     )
 }

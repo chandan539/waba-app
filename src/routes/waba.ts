@@ -247,13 +247,19 @@ router.get('/inbox', requireAdmin, async (req, res) => {
     try {
         const all = req.query.scope === 'all'
         const accountId = String(req.query.accountId || '')
-        const [conversations, templates] = await Promise.all([
-            listWabaConversations(accountId, all),
+        const page = Number(req.query.page || 1)
+        if (!Number.isSafeInteger(page) || page < 1) return res.status(400).json({ error: 'Choose a valid page.' })
+        const [{ conversations, hasNext }, templates] = await Promise.all([
+            listWabaConversations(accountId, all, {
+                page,
+                search: typeof req.query.search === 'string' ? req.query.search : '',
+                unreadOnly: req.query.unread === 'true',
+            }),
             accountId ? prisma.whatsAppTemplate.findMany({
                 where: { accountId, status: 'APPROVED' }, select: { id: true, name: true, status: true },
             }) : undefined,
         ])
-        res.json({ success: true, conversations, templates, unread: conversations.reduce((sum: number, item: any) => sum + (item.unreadCount || 0), 0) })
+        res.json({ success: true, conversations, templates, page, hasNext, unread: conversations.reduce((sum: number, item: any) => sum + (item.unreadCount || 0), 0) })
     } catch (error: any) {
         res.status(500).json({ error: error.message || 'Could not load inbox' })
     }
@@ -263,7 +269,7 @@ router.get('/inbox/attachments/:messageId', requireAdmin, downloadWabaInboxAttac
 
 router.get('/inbox/:phone', requireAdmin, async (req, res) => {
     try {
-        const thread = await listWabaThread(String(req.params.phone || ''), String(req.query.accountId || ''))
+        const thread = await listWabaThread(String(req.params.phone || ''), String(req.query.accountId || ''), typeof req.query.before === 'string' ? req.query.before : undefined)
         res.json({ success: true, ...thread })
     } catch (error: any) {
         res.status(400).json({ error: error.message || 'Could not load conversation' })

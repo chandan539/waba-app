@@ -807,53 +807,78 @@ export async function recordWabaMessage(input: {
     })
 }
 
-export async function listWabaConversations(accountId?: string | null, all = false) {
+const INBOX_PAGE_SIZE = 20
+const THREAD_PAGE_SIZE = 50
+
+export async function listWabaConversations(
+    accountId?: string | null,
+    all = false,
+    options: { page?: number; search?: string; unreadOnly?: boolean } = {},
+) {
     const account = all ? null : await getWabaAccount(accountId)
-    const scopedId = account?.id || accountId || undefined
-    const scopedWhere = all
-        ? { accountId: { in: (await prisma.whatsAppAccount.findMany({ where: { phoneNumberId: { not: null }, accessToken: { not: null } }, select: { id: true } })).map((row: { id: string }) => row.id) } }
-        : scopedId ? { accountId: scopedId } : { accountId: null }
-    const contacts = await prisma.whatsAppContact.findMany({
-        where: scopedWhere,
-        orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
-        take: 80,
-    })
-    const withMessages = contacts.filter((row: any) => row.lastMessageAt || row.lastInboundAt || row.lastMessage)
-    if (withMessages.length) return withMessages
-    const messages = await prisma.whatsAppMessage.findMany({
-        where: scopedWhere,
-        orderBy: { createdAt: 'desc' },
-        take: 200,
-    })
-    const byPhone = new Map<string, any>()
-    for (const message of messages) {
-        const key = `${message.accountId || ''}:${message.phone}`
-        if (byPhone.has(key)) continue
-        byPhone.set(key, {
-            id: message.id,
-            accountId: message.accountId,
-            phone: message.phone,
-            displayName: message.contactName,
-            lastMessage: message.body,
-            lastMessageAt: message.createdAt,
-            unreadCount: message.direction === 'INBOUND' ? 1 : 0,
-            optedOut: false,
+    const accounts = all
+        ? await prisma.whatsAppAccount.findMany({
+            where: { phoneNumberId: { not: null }, accessToken: { not: null } },
+            select: { id: true },
         })
-    }
-    return [...byPhone.values()]
+        : account ? [account] : []
+    const ids = accounts.map((row: { id: string }) => row.id)
+    const page = options.page || 1
+    const search = options.search?.trim().slice(0, 200) || ''
+    // Include older imports that have messages but lack a contact summary.
+    const rows = await prisma.$queryRawUnsafe(
+        `WITH orphan_messages AS (
+            SELECT DISTINCT ON (m."accountId", m.phone)
+                m.id, m."accountId", m.phone, m."contactName" AS "displayName",
+                m.body AS "lastMessage", m."createdAt" AS "lastMessageAt",
+                CASE WHEN m.direction = 'INBOUND' THEN 1 ELSE 0 END AS "unreadCount",
+                false AS "optedOut"
+            FROM "WhatsAppMessage" m
+            WHERE m."accountId" = ANY($1::text[])
+              AND NOT EXISTS (
+                  SELECT 1 FROM "WhatsAppContact" c
+                  WHERE c."accountId" = m."accountId" AND c.phone = m.phone
+              )
+            ORDER BY m."accountId", m.phone, m."createdAt" DESC, m.id DESC
+        ), conversations AS (
+            SELECT id, "accountId", phone, "displayName", "lastMessage",
+                   "lastMessageAt", "unreadCount", "optedOut"
+            FROM "WhatsAppContact" WHERE "accountId" = ANY($1::text[])
+            UNION ALL
+            SELECT * FROM orphan_messages
+        )
+        SELECT * FROM conversations
+        WHERE (NOT $2::boolean OR "unreadCount" > 0)
+          AND strpos(lower(concat_ws(' ', "displayName", phone, "lastMessage")), lower($3::text)) > 0
+        ORDER BY "lastMessageAt" DESC NULLS LAST, id DESC
+        LIMIT $4 OFFSET $5`,
+        ids, Boolean(options.unreadOnly), search, INBOX_PAGE_SIZE + 1, (page - 1) * INBOX_PAGE_SIZE,
+    )
+    return { conversations: rows.slice(0, INBOX_PAGE_SIZE), hasNext: rows.length > INBOX_PAGE_SIZE }
 }
 
-export async function listWabaThread(phone: string, accountId?: string | null) {
+export async function listWabaThread(phone: string, accountId?: string | null, before?: string) {
     const normalized = normalizeWabaPhone(phone)
     const account = await getWabaAccount(accountId)
     const scopedId = account?.id || accountId || undefined
-    if (!normalized) return { contact: null, messages: [], canReply: false }
+    if (!normalized || !scopedId) return { contact: null, messages: [], canReply: false, olderCursor: null }
+    const scope = { phone: normalized, accountId: scopedId }
+    const anchor = before ? await prisma.whatsAppMessage.findFirst({
+        where: { ...scope, id: before }, select: { id: true, createdAt: true },
+    }) : null
+    if (before && !anchor) throw new Error('This history marker is no longer available. Reopen the chat.')
     const [contact, messages, templates] = await Promise.all([
         prisma.whatsAppContact.findUnique({ where: { accountId_phone: { accountId: scopedId || '', phone: normalized } } }).catch(() => null),
         prisma.whatsAppMessage.findMany({
-            where: { phone: normalized, accountId: scopedId },
+            where: {
+                ...scope,
+                ...(anchor ? { OR: [
+                    { createdAt: { lt: anchor.createdAt } },
+                    { createdAt: anchor.createdAt, id: { lt: anchor.id } },
+                ] } : {}),
+            },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-            take: 200,
+            take: THREAD_PAGE_SIZE + 1,
         }),
         scopedId ? prisma.whatsAppTemplate.findMany({
             where: { accountId: scopedId, status: 'APPROVED' },
@@ -863,7 +888,8 @@ export async function listWabaThread(phone: string, accountId?: string | null) {
     ])
     return {
         contact,
-        messages: messages.reverse().map(({ raw, ...message }: any) => {
+        olderCursor: messages.length > THREAD_PAGE_SIZE ? messages[THREAD_PAGE_SIZE - 1].id : null,
+        messages: messages.slice(0, THREAD_PAGE_SIZE).reverse().map(({ raw, ...message }: any) => {
             const attachment = inboxMedia({ ...message, raw })
             return {
                 ...message,

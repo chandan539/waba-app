@@ -85,9 +85,16 @@ axios.defaults.adapter = async config => {
         if (body.handover) current.handovers.push({ id: crypto.randomUUID(), phone: body.phone })
     } else if (path === '/inbox') {
         const ids = config.params?.scope === 'all' ? accounts.map(item => item.id) : [inboxAccountId]
-        data = { templates, conversations: ids.flatMap((id, index) => people.slice(0, index === 0 ? 3 : 1).map(person => ({
-            ...person, id: `${id}:${person.id}`, accountId: id, lastMessageAt: now(),
-        }))) }
+        const search = String(config.params?.search || '').trim().toLowerCase()
+        const start = (Number(config.params?.page || 1) - 1) * 20
+        const rows = ids.flatMap((id, index) => people.slice(0, index === 0 ? 3 : 1).map(person => ({
+            ...person, id: `${id}:${person.id}`, accountId: id,
+            lastMessageAt: new Date(Date.now() - index * 86400000).toISOString(),
+        }))).filter(person =>
+            (!config.params?.unread || person.unreadCount > 0) &&
+            `${person.displayName} ${person.phone} ${person.lastMessage}`.toLowerCase().includes(search),
+        )
+        data = { templates, conversations: rows.slice(start, start + 20), hasNext: rows.length > start + 20 }
     } else if (path === '/inbox/read') {
         // Read receipts are simulated.
     } else if (path === '/inbox/reply' || path === '/inbox/template') {
@@ -109,10 +116,23 @@ axios.defaults.adapter = async config => {
             { id: 'demo-image', direction: 'INBOUND', type: 'image', body: 'And a sample image.', createdAt: now(), attachment: { filename: 'sample-image.png', expiresAt } },
             { id: 'demo-contact', direction: 'INBOUND', type: 'contacts', body: '[contacts]', createdAt: now(), sharedContacts: [{ name: 'Jordan Lee', company: 'Example Studio', phones: ['+1 202-555-0190'], emails: ['jordan@example.com'] }] },
         ] : []
-        data = { contact: person && { ...person, unreadCount: 0 }, canReply: true, templates, messages: [
+        const previousMessages = person?.id === 'c1' ? Array.from({ length: 55 }, (_, i) => ({
+            id: `history-${i}`, direction: i % 2 ? 'OUTBOUND' : 'INBOUND', type: 'text',
+            body: i === 0 ? 'Our first conversation about the project.' : `Sample project update ${i}.`,
+            createdAt: new Date(Date.now() - (55 - i) * 86400000).toISOString(),
+        })) : []
+        const history = [
+            ...previousMessages,
             ...(person ? [{ id: 'initial', direction: 'INBOUND', type: 'text', body: person.lastMessage, createdAt: now() }] : []),
             ...attachmentMessages, ...(current.replies[phone] || []),
-        ] }
+        ]
+        const end = config.params?.before ? history.findIndex(message => message.id === config.params.before) : history.length
+        if (end < 0) fail('History marker not found.')
+        const start = Math.max(0, end - 50)
+        data = {
+            contact: person && { ...person, unreadCount: 0 }, canReply: true, templates,
+            messages: history.slice(start, end), olderCursor: start > 0 ? history[start].id : null,
+        }
     } else if (path === '/flows' && method === 'get') {
         data = { flows: current.flows }
     } else if (path === '/flows' && method === 'post') {
