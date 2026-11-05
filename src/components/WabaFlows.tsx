@@ -6,9 +6,9 @@ import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { cn } from '../lib/cn'
 import { WABA_FLOW_TRIGGERS } from '../lib/waba'
 
-const btnClass = 'inline-flex h-11 items-center justify-center rounded-2xl bg-[#001a72] px-4 text-sm font-black text-white disabled:opacity-50'
-const ghostClass = 'inline-flex h-11 items-center justify-center rounded-2xl bg-slate-100 px-4 text-sm font-black text-slate-700'
-const inputClass = 'w-full rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900'
+const btnClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-[#00685d] px-4 text-sm font-semibold text-white disabled:opacity-50'
+const ghostClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-slate-100 px-4 text-sm font-semibold text-slate-700'
+const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20'
 
 type Flow = {
     id: string
@@ -67,15 +67,15 @@ export function WabaFlows({
 
     return (
         <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
-            <section className="space-y-4 rounded-[2rem] border border-slate-100 bg-white p-6">
-                <h2 className="text-lg font-black text-slate-900">Event flows</h2>
+            <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6">
+                <h2 className="text-lg font-semibold text-slate-900">Event flows</h2>
                 <p className="text-sm text-slate-500">Same triggers as Email Flows. When the event fires and a phone is on the order or lead, these approved templates send on WhatsApp.</p>
                 <input className={inputClass} placeholder="Flow name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 <select className={inputClass} value={form.triggerType} onChange={(e) => setForm({ ...form, triggerType: e.target.value })}>
                     {WABA_FLOW_TRIGGERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                 </select>
                 <p className="text-xs font-semibold text-slate-500">{WABA_FLOW_TRIGGERS.find((item) => item.id === form.triggerType)?.description}</p>
-                <label className="flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+                <label className="flex items-center gap-3 rounded-lg bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
                     <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
                     Active
                 </label>
@@ -95,21 +95,21 @@ export function WabaFlows({
                                 setActiveId(item.id)
                                 setForm({ name: item.name, triggerType: item.triggerType, isActive: item.isActive })
                             }}
-                            className={cn('w-full rounded-2xl px-4 py-3 text-left', activeId === item.id ? 'bg-[#001a72] text-white' : 'bg-slate-50 text-slate-700')}
+                            className={cn('w-full rounded-lg px-4 py-3 text-left', activeId === item.id ? 'bg-[#00685d] text-white' : 'bg-slate-50 text-slate-700')}
                         >
-                            <p className="text-sm font-black">{item.name}</p>
+                            <p className="text-sm font-semibold">{item.name}</p>
                             <p className={cn('text-xs font-semibold', activeId === item.id ? 'text-white/70' : 'text-slate-500')}>{triggerLabel(item.triggerType)} · {item.isActive ? 'Active' : 'Paused'} · {item.steps.length} steps</p>
                         </button>
                     ))}
                     {!flows.length && <p className="text-sm font-semibold text-slate-400">No WhatsApp flows yet.</p>}
                 </div>
             </section>
-            <section className="space-y-4 rounded-[2rem] border border-slate-100 bg-white p-6">
+            <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6">
                 {active ? (
                     <>
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                                <h2 className="text-lg font-black text-slate-900">{active.name}</h2>
+                                <h2 className="text-lg font-semibold text-slate-900">{active.name}</h2>
                                 <p className="text-sm font-semibold text-slate-500">{triggerLabel(active.triggerType)}</p>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -137,9 +137,9 @@ export function WabaFlows({
                         <p className="text-xs font-semibold text-slate-400">Order · delay hours · template. Delay 0 sends immediately on the event.</p>
                         <div className="space-y-3">
                             {active.steps.map((step) => (
-                                <div key={step.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                                <div key={step.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-4 py-3">
                                     <div>
-                                        <p className="text-sm font-black text-slate-900">Step {step.sequenceOrder} · {step.templateName}</p>
+                                        <p className="text-sm font-semibold text-slate-900">Step {step.sequenceOrder} · {step.templateName}</p>
                                         <p className="text-xs font-semibold text-slate-500">{step.delayHours === 0 ? 'Sends immediately' : `Sends after ${step.delayHours} hours`}</p>
                                     </div>
                                     <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => {
@@ -148,7 +148,7 @@ export function WabaFlows({
                                     })}><Trash2 className="h-4 w-4" /></button>
                                 </div>
                             ))}
-                            {!active.steps.length && <p className="rounded-2xl bg-slate-50 p-6 text-sm font-semibold text-slate-400">Add a template step. Submit and approve templates in the Templates tab first.</p>}
+                            {!active.steps.length && <p className="rounded-lg bg-slate-50 p-6 text-sm font-semibold text-slate-400">Add a template step. Submit and approve templates in the Templates tab first.</p>}
                         </div>
                     </>
                 ) : (

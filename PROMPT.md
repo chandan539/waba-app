@@ -12,7 +12,7 @@ Implement the portable WhatsApp Cloud API module from `https://github.com/chanda
 2. Public webhook `GET+POST /api/whatsapp/webhook` that Meta can reach over HTTPS.
 3. Admin API under `/api/admin/waba` (settings, Embedded Signup, manual token connect, templates, campaigns, inbox reply, flows).
 4. Prisma models from `prisma/schema.prisma` (or run `prisma/waba.sql` additively).
-5. Event templates `txn_*` submitted as UTILITY, then queued when the host app fires the same trigger types as email (ORDER_PLACED, ORDER_SHIPPED, etc.).
+5. Three test templates `test_*` submitted as UTILITY, then queued when the host app fires the same trigger types as email (ORDER_PLACED, ORDER_SHIPPED, etc.).
 6. Minute cron that calls `processWhatsAppQueue()`.
 
 ## Copy these files
@@ -84,7 +84,7 @@ Inbound is webhook-only. Cloud API has no pull inbox.
 ## Done when
 
 - Admin Connect shows Cloud API CONNECTED for the real business number.
-- `Submit all event templates` creates 11 `txn_*` rows (some may be recategorized MARKETING by Meta).
+- `Add 3 test templates` submits only three `test_*` examples on explicit request and creates paused example flows. Maintenance must not submit templates or reactivate flows.
 - A personal WhatsApp can message the business number and the thread appears in Inbox within a few seconds.
 - Outbound template + 24h free reply both store in `WhatsAppMessage`.
 - Order/event code calls `triggerWhatsAppFlow` and the queue sends after Meta approves the template.

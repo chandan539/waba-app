@@ -502,15 +502,12 @@ export async function ensureEventWabaSetup() {
                     accountId: account.id,
                     name: item.label,
                     triggerType: item.trigger,
-                    isActive: true,
+                    isActive: false,
                     steps: { create: [{ sequenceOrder: 1, delayHours: 0, templateName: item.name }] },
                 },
                 include: { steps: true },
             })
         } else {
-            if (!flow.isActive) {
-                await prisma.whatsAppFlow.update({ where: { id: flow.id }, data: { isActive: true } })
-            }
             if (!flow.steps.length) {
                 await prisma.whatsAppFlowStep.create({
                     data: { flowId: flow.id, sequenceOrder: 1, delayHours: 0, templateName: item.name },
@@ -660,7 +657,6 @@ export async function maintainWabaConnection(force = false) {
     if (!force && now - lastWabaMaintain < 10 * 60 * 1000) return
     lastWabaMaintain = now
     await syncWabaTemplates().catch((error: any) => console.error('WABA_SYNC', error?.message || error))
-    await ensureEventWabaSetup().catch((error: any) => console.error('WABA_EVENT_TEMPLATES', error?.message || error))
     await ensureWabaWebhookSubscription().catch((error: any) => console.error('WABA_WEBHOOK_SUBSCRIBE', error?.message || error))
 }
 

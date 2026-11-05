@@ -37,17 +37,9 @@ const brand = wabaConfig.brand
 const shopHost = wabaConfig.shopHost()
 
 export const EVENT_WABA_TEMPLATES = [
-    { trigger: 'ACCOUNT_CREATED', name: 'txn_account_created', label: 'Account created', body: `Hello {{name}}, your ${brand} account is ready. Sign in at ${shopHost} to view products and orders. Reply here if you need help.` },
-    { trigger: 'ORDER_PLACED', name: 'txn_order_placed', label: 'Order placed', body: `Hello {{name}}, we have received ${brand} order {{orderId}}. Amount {{total}}. We will share dispatch updates on this WhatsApp.` },
-    { trigger: 'ORDER_SHIPPED', name: 'txn_order_shipped', label: 'Order shipped', body: `Hello {{name}}, ${brand} order {{orderId}} is shipped. Tracking {{awb}}. Reply here for delivery help.` },
-    { trigger: 'ORDER_DELIVERED', name: 'txn_order_delivered', label: 'Order delivered', body: `Hello {{name}}, ${brand} order {{orderId}} is marked delivered. Keep this chat for support.` },
-    { trigger: 'ABANDONED_CART', name: 'txn_checkout_open', label: 'Checkout still open', body: `Hello {{name}}, your ${brand} checkout {{orderId}} is still open. Complete it on ${shopHost} or reply here if you need help.` },
-    { trigger: 'REORDER_FOLLOWUP', name: 'txn_reorder_followup', label: 'Re-order follow up', body: `Hello {{name}}, this is a follow-up on ${brand} order {{orderId}}. Reply here for service or a new order.` },
-    { trigger: 'COD_PAYMENT_FOLLOWUP', name: 'txn_cod_payment', label: 'Payment follow-up', body: `Hello {{name}}, payment for ${brand} order {{orderId}} amount {{total}} is still pending. Reply here once paid or if you need the payment link.` },
-    { trigger: 'QUOTATION_FOLLOWUP', name: 'txn_quotation', label: 'Quotation follow-up', body: `Hello {{name}}, your ${brand} quotation {{orderId}} amount {{total}} is ready. Reply here to confirm or ask a question.` },
-    { trigger: 'MANUAL_SALE_CUSTOMER', name: 'txn_manual_sale', label: 'Manual sale confirmation', body: `Hello {{name}}, your ${brand} order {{orderId}} amount {{total}} is confirmed. We will update dispatch on this WhatsApp.` },
-    { trigger: 'WARRANTY_REGISTER', name: 'txn_warranty_register', label: 'Warranty registration', body: `Hello {{name}}, please register ${brand} warranty for order {{orderId}} at ${shopHost}/warranty. Reply here if the form does not open.` },
-    { trigger: 'WARRANTY_ACTIVATED', name: 'txn_warranty_activated', label: 'Warranty activated', body: `Hello {{name}}, ${brand} warranty for {{orderId}} is now active. Save this chat for service support.` },
+    { trigger: 'ACCOUNT_CREATED', name: 'test_account_ready', label: 'Test · Account ready', body: `Hello {{name}}, your ${brand} test account is ready. Visit ${shopHost} to review your account.` },
+    { trigger: 'ORDER_PLACED', name: 'test_order_confirmation', label: 'Test · Order confirmation', body: `Hello {{name}}, this is a test confirmation for ${brand} order {{orderId}}. Amount {{total}}.` },
+    { trigger: 'ORDER_SHIPPED', name: 'test_shipping_update', label: 'Test · Shipping update', body: `Hello {{name}}, this is a test shipping update for ${brand} order {{orderId}}. Tracking {{awb}}.` },
 ] as const
 
 export const WABA_FLOW_TRIGGERS = [

@@ -40,8 +40,9 @@ Meta App ID, App Secret, verify token, and access token are entered in the **Con
 
 ## Event templates
 
-`EVENT_WABA_TEMPLATES` in `src/lib/waba.ts` submits 11 UTILITY templates (`txn_*`). Brand and shop host come from `WABA_BRAND` and `WABA_SHOP_URL` at submit time. Click **Submit all event templates** after Cloud API is connected. Meta may recategorize checkout/reorder copy as MARKETING.
+`EVENT_WABA_TEMPLATES` in `src/lib/waba.ts` contains only three UTILITY test examples: account ready, order confirmation, and shipping update. Click **Add 3 test templates** to submit them for Meta review. Connection maintenance no longer submits templates automatically. Example flows are created paused and are never automatically reactivated. Enable them deliberately after testing. Brand and shop host come from `WABA_BRAND` and `WABA_SHOP_URL`.
 
+Previously submitted templates and existing flows are preserved; remove unwanted templates in WhatsApp Manager and pause unwanted flows in Automation. Local template deletion does not delete the remote Meta template.
 Triggers: `ACCOUNT_CREATED`, `ORDER_PLACED`, `ORDER_SHIPPED`, `ORDER_DELIVERED`, `ABANDONED_CART`, `REORDER_FOLLOWUP`, `COD_PAYMENT_FOLLOWUP`, `QUOTATION_FOLLOWUP`, `MANUAL_SALE_CUSTOMER`, `WARRANTY_REGISTER`, `WARRANTY_ACTIVATED`.
 
 ## Inbound inbox

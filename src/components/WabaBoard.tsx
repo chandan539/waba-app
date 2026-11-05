@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
-import { Loader2 } from 'lucide-react'
+import { Loader2, MessageSquare, Workflow, FileText, Megaphone, Plug, ChevronRight } from 'lucide-react'
 import { cn } from '../lib/cn'
 import { WABA_GRAPH_VERSION, embeddedSignupDialogUrl, isFacebookMessageOrigin, parseEmbeddedSignupMessage, wabaOauthRedirectUri } from '../lib/wabaSignup'
 import { WABA_FEATURE_PAUSED } from '../lib/wabaFlags'
@@ -92,20 +92,22 @@ const emptyStatus: Status = {
 }
 
 const TABS: { id: Tab; label: string }[] = [
-    { id: 'inbox', label: 'Inbox' },
-    { id: 'flows', label: 'Flows' },
+    { id: 'inbox', label: 'Shared inbox' },
+    { id: 'flows', label: 'Automation' },
     { id: 'templates', label: 'Templates' },
     { id: 'campaigns', label: 'Campaigns' },
-    { id: 'connect', label: 'Connect Meta' },
+    { id: 'connect', label: 'Integrations' },
 ]
 
-const inputClass = 'w-full rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900'
-const btnClass = 'inline-flex h-11 items-center justify-center rounded-2xl bg-[#001a72] px-4 text-sm font-black text-white disabled:opacity-50'
-const ghostClass = 'inline-flex h-11 items-center justify-center rounded-2xl bg-slate-100 px-4 text-sm font-black text-slate-700'
+const tabIcons = { inbox: MessageSquare, flows: Workflow, templates: FileText, campaigns: Megaphone, connect: Plug }
+
+const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20'
+const btnClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-[#00685d] px-4 text-sm font-semibold text-white disabled:opacity-50'
+const ghostClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-slate-100 px-4 text-sm font-semibold text-slate-700'
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
     return (
-        <label className="grid gap-1 text-xs font-black uppercase tracking-widest text-slate-400">
+        <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
             {label}
             {children}
         </label>
@@ -322,9 +324,9 @@ export function WabaBoard() {
     if (WABA_FEATURE_PAUSED) {
         return (
             <div className="space-y-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Marketing</p>
-                <h1 className="font-outfit text-3xl font-black text-slate-900">WhatsApp <span className="text-blue-600">WABA</span></h1>
-                <p className="max-w-xl rounded-[1.5rem] bg-amber-50 p-6 text-sm font-semibold text-amber-900">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Marketing</p>
+                <h1 className="font-sans text-3xl font-semibold text-slate-900">WhatsApp <span className="text-blue-600">WABA</span></h1>
+                <p className="max-w-xl rounded-xl bg-amber-50 p-6 text-sm font-semibold text-amber-900">
                     WhatsApp WABA is paused. Inbox polling, campaigns, and event flows are off so they do not hit the database. Connected numbers and templates stay saved. Say when you want this turned back on.
                 </p>
             </div>
@@ -342,33 +344,35 @@ export function WabaBoard() {
     const approved = templates.filter((item) => String(item.status).toUpperCase() === 'APPROVED')
 
     return (
-        <div className="space-y-8">
-            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Marketing</p>
-                    <h1 className="font-outfit text-3xl font-black text-slate-900">WhatsApp <span className="text-blue-600">WABA</span></h1>
-                    <p className="mt-1 text-sm font-medium text-slate-500">Inbox for customer WhatsApp, event flows like email, templates, and broadcasts.</p>
-                </div>
-                <div className={cn('rounded-2xl px-4 py-3 text-sm font-black', status.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>
-                    {status.connected ? `Connected ${status.displayPhone || status.wabaId}${status.cloudRegistered ? ' · Cloud API' : ' · not on Cloud API'}` : status.pendingPhone ? 'WABA linked — add a phone number' : 'Not connected'}
-                </div>
-            </div>
+        <div className="waba-workspace grid min-h-[48rem] overflow-hidden rounded-xl border border-slate-200 bg-[#f7f9fc] text-[#172B4D] md:grid-cols-[210px_minmax(0,1fr)]" style={{ fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' }}>
+            <aside className="flex flex-col gap-6 border-b border-slate-200 bg-[#f2f4f7] p-5 md:border-b-0 md:border-r">
+                <div className="flex items-center gap-3 py-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#00685d] text-white"><MessageSquare size={22} /></span><span className="text-xl font-semibold tracking-tight">Wabix AI</span></div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">WhatsApp workspace</p><p className="mt-1 truncate text-sm font-semibold">{status.displayName || 'Your business'}</p><p className="mt-2 truncate text-xs text-[#00685d]">{status.displayPhone || 'Connect a number to begin'}</p></div>
+                <nav aria-label="WhatsApp navigation" className="flex flex-wrap gap-2 md:flex-col">
+                    {TABS.map((item) => { const Icon = tabIcons[item.id]; return <button key={item.id} type="button" aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)} className={cn('flex items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition-colors', tab === item.id ? 'bg-[#00685d] text-white shadow-sm' : 'text-slate-600 hover:bg-white')}><Icon size={18} />{item.label}</button> })}
+                </nav>
+                <div className="mt-auto rounded-lg border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-500">WhatsApp Business Platform<p className="mt-1 font-medium text-[#00685d]">Customer conversations, connected.</p></div>
+            </aside>
+            <main className="min-w-0">
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{TABS.find(item => item.id === tab)?.label}</span></p><span role="status" className={cn('rounded-full px-3 py-1.5 text-xs font-medium', status.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>{status.connected ? '● Connected' : status.pendingPhone ? '● Phone pending' : '○ Not connected'}</span></header>
+                <div className="space-y-6 p-4 lg:p-7">
+                <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{TABS.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Connect and manage your WhatsApp Business numbers.' }[tab]}</p></div>
 
             {accounts.length > 0 && (
-                <section className="rounded-[2rem] border border-slate-100 bg-white p-4">
-                    <p className="mb-3 text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp numbers</p>
+                <section className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">WhatsApp numbers</p>
                     <div className="flex flex-col gap-2">
                         {accounts.map((item) => (
-                            <div key={item.id} className={cn('flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3', item.isSelected ? 'bg-[#001a72] text-white' : 'bg-slate-50 text-slate-700')}>
+                            <div key={item.id} className={cn('flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3', item.isSelected ? 'bg-[#00685d] text-white' : 'bg-slate-50 text-slate-700')}>
                                 <button type="button" className="min-w-0 flex-1 text-left" onClick={() => run(async () => { await axios.post('/api/admin/waba/accounts/select', { accountId: item.id }) })}>
-                                    <p className="truncate text-sm font-black">{item.label || item.displayPhone || item.wabaId || 'WhatsApp number'}</p>
+                                    <p className="truncate text-sm font-semibold">{item.label || item.displayPhone || item.wabaId || 'WhatsApp number'}</p>
                                     <p className={cn('text-xs font-semibold', item.isSelected ? 'text-white/70' : 'text-slate-500')}>
                                         {item.connected ? `${item.displayName || 'Connected'} · ${item.phoneNumberId}` : item.pendingPhone ? 'Phone pending' : 'Not connected — delete if this number was removed in Meta'}
                                     </p>
                                 </button>
                                 <button
                                     type="button"
-                                    className={cn('h-10 rounded-xl px-3 text-xs font-black', item.isSelected ? 'bg-white/15 text-white' : 'bg-white text-red-600')}
+                                    className={cn('h-10 rounded-xl px-3 text-xs font-semibold', item.isSelected ? 'bg-white/15 text-white' : 'bg-white text-red-600')}
                                     disabled={saving}
                                     onClick={() => run(async () => {
                                         if (!confirm('Remove this WhatsApp number? Inbox, templates and flows for this number will be deleted here. This does not change Meta if you already deleted it there.')) return
@@ -385,31 +389,15 @@ export function WabaBoard() {
             )}
 
             {status.nameStatus && status.nameStatus !== 'APPROVED' && (
-                <p className="rounded-[1.5rem] bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+                <p className="rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">
                     Display name “{status.displayName || 'this number'}” is {status.nameStatus.replaceAll('_', ' ').toLowerCase()}. WhatsApp keeps a single grey tick and will not deliver chats to this inbox until Meta approves the name. Check WhatsApp Manager → Phone numbers. Then send a new hi.
                 </p>
             )}
             {status.canSendMessage === 'BLOCKED' && (
-                <p className="rounded-[1.5rem] bg-rose-50 p-4 text-sm font-semibold text-rose-900">
+                <p className="rounded-xl bg-rose-50 p-4 text-sm font-semibold text-rose-900">
                     Meta blocked this WABA from sending. {status.healthError || 'Add a payment method in WhatsApp Manager for this WhatsApp Business account.'}
                 </p>
             )}
-
-            <div className="flex flex-wrap gap-2">
-                {TABS.map((item) => (
-                    <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setTab(item.id)}
-                        className={cn(
-                            'h-11 rounded-2xl px-4 text-sm font-black',
-                            tab === item.id ? 'bg-[#001a72] text-white' : 'bg-slate-100 text-slate-600',
-                        )}
-                    >
-                        {item.label}
-                    </button>
-                ))}
-            </div>
 
             {tab === 'inbox' && (
                 <WabaInbox connected={status.connected} templates={templates} accountId={status.id} displayPhone={status.displayPhone} lastWebhookAt={status.lastWebhookAt} lastWebhookFields={status.lastWebhookFields} />
@@ -421,8 +409,8 @@ export function WabaBoard() {
 
             {tab === 'connect' && (
                 <div className="grid gap-6 lg:grid-cols-2">
-                    <section className="space-y-4 rounded-[2rem] border border-slate-100 bg-white p-6">
-                        <h2 className="text-lg font-black text-slate-900">1. Meta app (Embedded Signup v4)</h2>
+                    <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6">
+                        <h2 className="text-lg font-semibold text-slate-900">1. Meta app (Embedded Signup v4)</h2>
                         <p className="text-sm text-slate-500">Create a new Facebook Login for Business configuration. Choosing products sets the flow to v4. Do not reuse a v2/v3 config. Graph {status.graphVersion}.</p>
                         <ol className="list-decimal space-y-1 pl-5 text-sm font-medium text-slate-500">
                             <li>App Dashboard → Facebook Login for Business → Settings: turn on Client OAuth, Web OAuth, Enforce HTTPS, Embedded Browser OAuth, Strict Mode, and Login with the JavaScript SDK.</li>
@@ -442,7 +430,7 @@ export function WabaBoard() {
                         <button type="button" className={btnClass} disabled={saving} onClick={() => run(async () => { await axios.post('/api/admin/waba/settings', settings) })}>
                             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Meta settings'}
                         </button>
-                        <div className="rounded-2xl bg-slate-50 p-4 text-xs font-semibold text-slate-500">
+                        <div className="rounded-lg bg-slate-50 p-4 text-xs font-semibold text-slate-500">
                             <p>Webhook URL</p>
                             <p className="mt-1 break-all font-mono text-slate-800">{status.webhookUrl}</p>
                             <p className="mt-2">Verify token</p>
@@ -450,14 +438,14 @@ export function WabaBoard() {
                             <p className="mt-2">Subscribe to messages, message_template_status_update, and account_update.</p>
                         </div>
                     </section>
-                    <section className="space-y-4 rounded-[2rem] border border-slate-100 bg-white p-6">
-                        <h2 className="text-lg font-black text-slate-900">2. Connect with Meta</h2>
+                    <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6">
+                        <h2 className="text-lg font-semibold text-slate-900">2. Connect with Meta</h2>
                         <p className="text-sm text-slate-500">v4 is phone-number-first. After the popup, this app must register the number on Cloud API. Without that step Meta says the account does not exist and templates stay pending. Finish the popup on desktop Chrome.</p>
                         {status.connected && !status.cloudRegistered && (
-                            <p className="rounded-2xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">This number is verified but not on Cloud API yet ({status.phoneStatus || 'PENDING'}). Click Register on Cloud API. If two-step verification is already on, use that PIN.</p>
+                            <p className="rounded-lg bg-amber-50 p-4 text-sm font-semibold text-amber-800">This number is verified but not on Cloud API yet ({status.phoneStatus || 'PENDING'}). Click Register on Cloud API. If two-step verification is already on, use that PIN.</p>
                         )}
                         {status.cloudRegistered && (
-                            <p className="rounded-2xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">Cloud API registered · {status.displayPhone || status.phoneNumberId} · {status.phoneStatus}</p>
+                            <p className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">Cloud API registered · {status.displayPhone || status.phoneNumberId} · {status.phoneStatus}</p>
                         )}
                         <Field label="Cloud API two-step PIN">
                             <input className={inputClass} value={manual.pin} onChange={(e) => setManual({ ...manual, pin: e.target.value })} placeholder="123456" />
@@ -483,8 +471,8 @@ export function WabaBoard() {
 
             {tab === 'templates' && (
                 <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
-                    <section className="space-y-4 rounded-[2rem] border border-slate-100 bg-white p-6">
-                        <h2 className="text-lg font-black text-slate-900">Submit template</h2>
+                    <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6">
+                        <h2 className="text-lg font-semibold text-slate-900">Submit template</h2>
                         <p className="text-sm text-slate-500">Use the same merge tags as email. Meta reviews UTILITY / MARKETING / AUTHENTICATION templates, usually within a day.</p>
                         <Field label="Name"><input className={inputClass} value={templateForm.name} onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })} /></Field>
                         <Field label="Language"><input className={inputClass} value={templateForm.language} onChange={(e) => setTemplateForm({ ...templateForm, language: e.target.value })} /></Field>
@@ -499,15 +487,15 @@ export function WabaBoard() {
                             <textarea className={cn(inputClass, 'min-h-32')} value={templateForm.body} onChange={(e) => setTemplateForm({ ...templateForm, body: e.target.value })} />
                         </Field>
                         <button type="button" className={btnClass} disabled={saving || !status.connected} onClick={() => run(async () => { await axios.post('/api/admin/waba/templates', templateForm) })}>Submit for approval</button>
-                        <button type="button" className={ghostClass} disabled={saving || !status.connected} onClick={() => run(async () => { await axios.post('/api/admin/waba/templates/events') })}>Submit all event templates</button>
+                        <button type="button" className={ghostClass} disabled={saving || !status.connected} onClick={() => run(async () => { await axios.post('/api/admin/waba/templates/events') })}>Add 3 test templates</button>
                         <button type="button" className={ghostClass} disabled={saving || !status.connected} onClick={() => run(async () => { await axios.post('/api/admin/waba/templates/sync') })}>Sync from Meta</button>
                     </section>
                     <section className="space-y-3">
                         {templates.map((item) => (
-                            <div key={item.id} className="rounded-[1.5rem] border border-slate-100 bg-white p-5">
+                            <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-5">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <p className="font-black text-slate-900">{item.name}</p>
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{item.status} · {item.category}</span>
+                                    <p className="font-semibold text-slate-900">{item.name}</p>
+                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{item.status} · {item.category}</span>
                                 </div>
                                 <p className="mt-2 text-sm text-slate-600">{item.bodyText}</p>
                                 {item.rejectionReason ? <p className="mt-2 text-sm font-semibold text-red-600">{item.rejectionReason}</p> : null}
@@ -518,15 +506,15 @@ export function WabaBoard() {
                                 </div>
                             </div>
                         ))}
-                        {!templates.length && <p className="rounded-[1.5rem] bg-slate-50 p-8 text-sm font-semibold text-slate-500">No templates yet. Submit one after connecting.</p>}
+                        {!templates.length && <p className="rounded-xl bg-slate-50 p-8 text-sm font-semibold text-slate-500">No templates yet. Submit one after connecting.</p>}
                     </section>
                 </div>
             )}
 
             {tab === 'campaigns' && (
                 <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
-                    <section className="space-y-4 rounded-[2rem] border border-slate-100 bg-white p-6">
-                        <h2 className="text-lg font-black text-slate-900">Broadcast</h2>
+                    <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-6">
+                        <h2 className="text-lg font-semibold text-slate-900">Broadcast</h2>
                         <p className="text-sm text-slate-500">Only APPROVED templates send. Attach the same templates to Email Flows for ORDER_PLACED and other triggers.</p>
                         <Field label="Name"><input className={inputClass} value={campaignForm.name} onChange={(e) => setCampaignForm({ ...campaignForm, name: e.target.value })} /></Field>
                         <Field label="Template">
@@ -546,14 +534,14 @@ export function WabaBoard() {
                             const created = await axios.post('/api/admin/waba/campaigns', campaignForm)
                             if (confirm('Queue this campaign now?')) await axios.post(`/api/admin/waba/campaigns/${created.data.campaign.id}/send`)
                         })}>Create and queue</button>
-                        <a href="/admin/email-flows" className="block text-sm font-black text-[#001a72]">Open Email Flows to attach WhatsApp templates →</a>
+                        <a href="/admin/email-flows" className="block text-sm font-semibold text-[#00685d]">Open Email Flows to attach WhatsApp templates →</a>
                     </section>
                     <section className="space-y-3">
                         {campaigns.map((item) => (
-                            <div key={item.id} className="rounded-[1.5rem] border border-slate-100 bg-white p-5">
+                            <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-5">
                                 <div className="flex items-center justify-between gap-2">
-                                    <p className="font-black text-slate-900">{item.name}</p>
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{item.status}</span>
+                                    <p className="font-semibold text-slate-900">{item.name}</p>
+                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{item.status}</span>
                                 </div>
                                 <p className="mt-1 text-sm text-slate-500">{item.template?.name} · {item.audience} · queued {item.queuedCount} · sent {item.sentCount} · failed {item.failedCount}</p>
                                 {item.status === 'DRAFT' && (
@@ -561,8 +549,8 @@ export function WabaBoard() {
                                 )}
                             </div>
                         ))}
-                        <div className="rounded-[1.5rem] bg-slate-50 p-5">
-                            <p className="text-xs font-black uppercase tracking-widest text-slate-400">Recent queue</p>
+                        <div className="rounded-xl bg-slate-50 p-5">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent queue</p>
                             <div className="mt-3 space-y-2">
                                 {queue.map((item) => (
                                     <p key={item.id} className="text-sm font-semibold text-slate-600">{item.phone} · {item.templateName} · {item.status}</p>
@@ -573,6 +561,8 @@ export function WabaBoard() {
                     </section>
                 </div>
             )}
+                </div>
+            </main>
         </div>
     )
 }
