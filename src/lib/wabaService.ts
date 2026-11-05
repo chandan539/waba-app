@@ -1,3 +1,4 @@
+import { inboxContacts, inboxMedia } from './wabaInboxContent'
 import { enqueueAssistantJob } from './assistantStore'
 import { getWabaPrisma, hostAudiencePhones } from './adapters'
 import { resolveWabaWebhookUrl } from './config'
@@ -806,10 +807,12 @@ export async function recordWabaMessage(input: {
     })
 }
 
-export async function listWabaConversations(accountId?: string | null) {
-    const account = await getWabaAccount(accountId)
+export async function listWabaConversations(accountId?: string | null, all = false) {
+    const account = all ? null : await getWabaAccount(accountId)
     const scopedId = account?.id || accountId || undefined
-    const scopedWhere = scopedId ? { OR: [{ accountId: scopedId }, { accountId: null }] } : {}
+    const scopedWhere = all
+        ? { accountId: { in: (await prisma.whatsAppAccount.findMany({ where: { phoneNumberId: { not: null }, accessToken: { not: null } }, select: { id: true } })).map((row: { id: string }) => row.id) } }
+        : scopedId ? { accountId: scopedId } : { accountId: null }
     const contacts = await prisma.whatsAppContact.findMany({
         where: scopedWhere,
         orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
@@ -824,8 +827,9 @@ export async function listWabaConversations(accountId?: string | null) {
     })
     const byPhone = new Map<string, any>()
     for (const message of messages) {
-        if (byPhone.has(message.phone)) continue
-        byPhone.set(message.phone, {
+        const key = `${message.accountId || ''}:${message.phone}`
+        if (byPhone.has(key)) continue
+        byPhone.set(key, {
             id: message.id,
             accountId: message.accountId,
             phone: message.phone,
@@ -844,17 +848,30 @@ export async function listWabaThread(phone: string, accountId?: string | null) {
     const account = await getWabaAccount(accountId)
     const scopedId = account?.id || accountId || undefined
     if (!normalized) return { contact: null, messages: [], canReply: false }
-    const [contact, messages] = await Promise.all([
+    const [contact, messages, templates] = await Promise.all([
         prisma.whatsAppContact.findUnique({ where: { accountId_phone: { accountId: scopedId || '', phone: normalized } } }).catch(() => null),
         prisma.whatsAppMessage.findMany({
             where: { phone: normalized, accountId: scopedId },
-            orderBy: { createdAt: 'asc' },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             take: 200,
         }),
+        scopedId ? prisma.whatsAppTemplate.findMany({
+            where: { accountId: scopedId, status: 'APPROVED' },
+            select: { id: true, name: true, status: true },
+            orderBy: { name: 'asc' },
+        }) : [],
     ])
     return {
         contact,
-        messages,
+        messages: messages.reverse().map(({ raw, ...message }: any) => {
+            const attachment = inboxMedia({ ...message, raw })
+            return {
+                ...message,
+                attachment: attachment ? { filename: attachment.filename, expiresAt: attachment.expiresAt } : null,
+                sharedContacts: message.type === 'contacts' ? inboxContacts(raw) : [],
+            }
+        }),
+        templates,
         canReply: isWabaCustomerCareOpen(contact?.lastInboundAt),
     }
 }

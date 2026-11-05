@@ -10,6 +10,7 @@ import { confirmBooking, holdBooking, expireBookingHolds, preparePayment } from 
 import { disconnectWaba, recordWabaMessage, saveConnectedWaba } from './wabaService'
 import analyticsRouter from '../routes/wabaAnalytics'
 import adminRouter from '../routes/wabaAssistant'
+import wabaRouter from '../routes/waba'
 import webhookRouter from '../routes/wabaPublic'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -86,6 +87,7 @@ describe.skipIf(!databaseUrl)('assistant with real Postgres and mocked external 
         app.use('/webhook', webhookRouter)
         app.use('/assistant', adminRouter)
         app.use('/analytics', analyticsRouter)
+        app.use('/waba', wabaRouter)
     })
     beforeEach(async () => {
         for (const model of [
@@ -445,6 +447,55 @@ describe.skipIf(!databaseUrl)('assistant with real Postgres and mocked external 
         expect(response.status).toBe(200)
         expect(response.body.daily).toHaveLength(7)
         expect(response.body.daily.at(-1)).toMatchObject({ inbound: 1, outbound: 1, delivered: 1, read: 1 })
+    })
+
+    it('keeps the same customer separated by business number and renders shared contacts', async () => {
+        const other = await prisma.whatsAppAccount.create({ data: {
+            wabaId: 'test-waba', phoneNumberId: 'other-number', accessToken: 'other-token',
+        } })
+        await recordWabaMessage({ accountId, phone, direction: 'INBOUND', body: 'Main line' })
+        await recordWabaMessage({
+            accountId: other.id, phone, direction: 'INBOUND', type: 'contacts', body: '[contacts]',
+            raw: { contacts: [{ name: { formatted_name: 'Jordan Lee' }, phones: [{ phone: '+1 202-555-0190' }] }] },
+        })
+        const combined = await request(app).get('/waba/inbox').query({ scope: 'all' }).expect(200)
+        expect(combined.body.conversations.map((row: any) => row.accountId)).toEqual(expect.arrayContaining([accountId, other.id]))
+        const filtered = await request(app).get('/waba/inbox').query({ accountId: other.id }).expect(200)
+        expect(filtered.body.conversations).toHaveLength(1)
+        const thread = await request(app).get(`/waba/inbox/${phone}`).query({ accountId: other.id }).expect(200)
+        expect(thread.body.messages).toHaveLength(1)
+        expect(thread.body.messages[0]).not.toHaveProperty('raw')
+        expect(thread.body.messages[0].sharedContacts).toEqual([expect.objectContaining({
+            name: 'Jordan Lee', phones: ['+1 202-555-0190'],
+        })])
+        await request(app).post('/waba/inbox/reply').send({ accountId: other.id, phone, text: 'On this line' }).expect(200)
+        expect(fetchMock.mock.calls.at(-1)[0]).toContain('/other-number/messages')
+    })
+
+    it('streams a PDF using the owning number credentials and rejects expired or cross-number downloads', async () => {
+        const media = { id: '12345', mime_type: 'application/pdf', filename: 'brief.pdf' }
+        const recent = await recordWabaMessage({
+            accountId, phone, direction: 'INBOUND', type: 'document', body: 'brief.pdf', raw: { document: media },
+        })
+        const expired = await recordWabaMessage({
+            accountId, phone, direction: 'INBOUND', type: 'document', body: 'old.pdf', raw: { document: media },
+            createdAt: new Date(Date.now() - 25 * 3600000),
+        })
+        await request(app).get(`/waba/inbox/attachments/${recent.id}`).query({ accountId: 'other' }).expect(404)
+        await request(app).get(`/waba/inbox/attachments/${expired.id}`).query({ accountId }).expect(410)
+        expect(fetchMock).not.toHaveBeenCalled()
+        fetchMock.mockImplementation(async (url: string | URL) => String(url).includes('graph.facebook.com')
+            ? new Response(JSON.stringify({ url: 'https://lookaside.fbsbx.com/attachment', file_size: 9 }))
+            : new Response('%PDF-1.4\n'))
+        const response = await request(app).get(`/waba/inbox/attachments/${recent.id}`).query({ accountId }).expect(200)
+        expect(response.body.toString()).toBe('%PDF-1.4\n')
+        expect(response.headers['content-disposition']).toContain('brief.pdf')
+        expect(response.headers['cache-control']).toBe('private, no-store')
+        expect(String(fetchMock.mock.calls[0][0])).toContain('phone_number_id=test-phone-id')
+        expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer fake')
+        fetchMock.mockClear().mockResolvedValue(new Response(JSON.stringify({ url: 'https://example.com/attachment' })))
+        await request(app).get(`/waba/inbox/attachments/${recent.id}`).query({ accountId }).expect(502)
+        expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 
 })

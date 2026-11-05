@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
-import { Loader2, Search, MessageSquare, UserRound } from 'lucide-react'
+import { Download, FileText, Loader2, Search, MessageSquare, UserRound } from 'lucide-react'
 import { cn } from '../lib/cn'
 
 type Conversation = {
     id: string
     phone: string
+    accountId?: string | null
     displayName?: string | null
     lastMessage?: string | null
     lastMessageAt?: string | null
@@ -24,6 +25,8 @@ type Message = {
     templateName?: string | null
     status?: string | null
     createdAt: string
+    attachment?: { filename: string; expiresAt: string } | null
+    sharedContacts?: { name: string; company: string; phones: string[]; emails: string[] }[]
 }
 
 const btnClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-[#00685d] px-4 text-sm font-semibold text-white disabled:opacity-50'
@@ -36,25 +39,60 @@ function formatWhen(value?: string | null) {
     return date.toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })
 }
 
-export function WabaInbox({
-    connected,
-    templates,
-    accountId,
-    displayPhone,
-    lastWebhookAt,
-    lastWebhookFields,
-}: {
+type InboxNumber = { id: string; label?: string; displayName?: string; displayPhone?: string; phoneNumberId?: string; connected: boolean }
+type InboxProps = {
     connected: boolean
     templates: Array<{ id: string; name: string; status: string }>
     accountId?: string
     displayPhone?: string
     lastWebhookAt?: string | null
     lastWebhookFields?: string
-}) {
+    accounts?: InboxNumber[]
+}
+const numberLabel = (number: InboxNumber) => [...new Set([
+    number.displayName || number.label, number.displayPhone || number.phoneNumberId || number.label,
+].filter(Boolean))].join(' · ') || 'Business number'
+
+export function WabaInbox(props: InboxProps) {
+    const numbers = (props.accounts || []).filter(account => account.connected)
+    const [filter, setFilter] = useState('all')
+    const selected = numbers.find(account => account.id === filter)
+    const all = !selected && numbers.length > 0
+    const sendingAccount = selected || numbers.find(number => number.id === props.accountId) || numbers[0]
+    const sendingId = sendingAccount?.id || props.accountId
+    return <div className="min-w-0 space-y-3">
+        <label className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold">
+            Business number
+            <select aria-label="Inbox business number" value={selected?.id || 'all'} onChange={e => setFilter(e.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal">
+                <option value="all">All connected numbers ({numbers.length || Number(props.connected)})</option>
+                {numbers.map(account => <option key={account.id} value={account.id}>{numberLabel(account)}</option>)}
+            </select>
+        </label>
+        <InboxThreads key={selected?.id || 'all'} {...props} all={all} numbers={numbers}
+            connected={props.connected || numbers.length > 0} accountId={sendingId}
+            displayPhone={sendingAccount?.displayPhone || props.displayPhone}
+            templates={sendingId === props.accountId ? props.templates : []} />
+    </div>
+}
+
+function InboxThreads({
+    connected, templates, accountId, displayPhone, lastWebhookAt, lastWebhookFields, all, numbers,
+}: InboxProps & { all: boolean; numbers: InboxNumber[] }) {
     const [search, setSearch] = useState('')
     const [unreadOnly, setUnreadOnly] = useState(false)
     const [conversations, setConversations] = useState<Conversation[]>([])
-    const [activePhone, setActivePhone] = useState('')
+    const [thread, setThread] = useState<{ phone: string; accountId?: string | null }>()
+    const threadIdentity = useRef('')
+    const activePhone = thread?.phone || ''
+    const receivingId = thread?.accountId || accountId
+    const [numberTemplates, setNumberTemplates] = useState<InboxProps['templates']>()
+    const [threadTemplates, setThreadTemplates] = useState<InboxProps['templates']>()
+    const [attachmentError, setAttachmentError] = useState('')
+    const [downloading, setDownloading] = useState('')
+    const businessName = (id?: string | null) => {
+        const number = numbers.find(item => item.id === id)
+        return number ? numberLabel(number) : displayPhone || 'Business number'
+    }
     const [messages, setMessages] = useState<Message[]>([])
     const [canReply, setCanReply] = useState(false)
     const [draft, setDraft] = useState('')
@@ -64,30 +102,36 @@ export function WabaInbox({
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const threadRef = useRef<HTMLDivElement>(null)
-    const approved = templates.filter((item) => String(item.status).toUpperCase() === 'APPROVED')
-    const chosenTemplate = templateId || approved[0]?.id || ''
+    const approved = (threadTemplates || (receivingId === accountId ? numberTemplates || templates : [])).filter((item) => String(item.status).toUpperCase() === 'APPROVED')
+    const chosenTemplate = approved.some(item => item.id === templateId) ? templateId : approved[0]?.id || ''
 
     const loadInbox = async () => {
-        const res = await axios.get('/api/admin/waba/inbox', { params: { accountId } })
+        const res = await axios.get('/api/admin/waba/inbox', { params: { accountId, ...(all ? { scope: 'all' } : {}) } })
         setConversations(res.data.conversations || [])
+        setNumberTemplates(res.data.templates)
     }
 
-    const loadThread = async (phone: string) => {
+    const loadThread = async (phone: string, id = receivingId) => {
         if (!phone) return
-        const res = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(phone)}`, { params: { accountId } })
+        const key = `${id || ''}:${phone}`
+        const res = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(phone)}`, { params: { accountId: id } })
+        if (threadIdentity.current !== key) return
         setMessages(res.data.messages || [])
+        setThreadTemplates(res.data.templates)
         setCanReply(!!res.data.canReply)
         if ((res.data.contact?.unreadCount || 0) > 0) {
-            await axios.post('/api/admin/waba/inbox/read', { phone, accountId }).catch(() => null)
-            setConversations((prev) => prev.map((item) => item.phone === phone ? { ...item, unreadCount: 0 } : item))
+            await axios.post('/api/admin/waba/inbox/read', { phone, accountId: id }).catch(() => null)
+            setConversations(prev => prev.map(item => item.phone === phone && (item.accountId || accountId) === id ? { ...item, unreadCount: 0 } : item))
         }
     }
 
     useEffect(() => {
-        setActivePhone('')
+        threadIdentity.current = ''
+        setThread(undefined)
         setMessages([])
-        loadInbox().catch(() => null).finally(() => setLoading(false))
-    }, [accountId])
+        loadInbox().catch(() => setError('Could not load conversations.')).finally(() => setLoading(false))
+        return () => { threadIdentity.current = '' }
+    }, [accountId, all])
 
     useEffect(() => {
         const timer = window.setInterval(() => {
@@ -95,23 +139,51 @@ export function WabaInbox({
             if (activePhone) loadThread(activePhone).catch(() => null)
         }, 8000)
         return () => window.clearInterval(timer)
-    }, [activePhone, accountId])
+    }, [activePhone, receivingId, accountId, all])
 
     useEffect(() => {
         threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight })
     }, [messages.length])
 
-    const openThread = async (phone: string) => {
-        setActivePhone(phone)
+    const openThread = async (phone: string, id = accountId) => {
+        threadIdentity.current = `${id || ''}:${phone}`
+        setThread({ phone, accountId: id })
         setDraft('')
-        await loadThread(phone).catch((error) => alert(error.response?.data?.error || 'Could not open chat'))
+        setError('')
+        setAttachmentError('')
+        setMessages([])
+        setThreadTemplates(undefined)
+        setCanReply(false)
+        await loadThread(phone, id).catch(() => {
+            if (threadIdentity.current === `${id || ''}:${phone}`) setError('Could not open this conversation.')
+        })
+    }
+
+    async function downloadAttachment(item: Message) {
+        if (!item.attachment || !receivingId) return
+        setAttachmentError('')
+        setDownloading(item.id)
+        try {
+            const { data } = await axios.get<Blob>(`/api/admin/waba/inbox/attachments/${encodeURIComponent(item.id)}`, {
+                params: { accountId: receivingId }, responseType: 'blob',
+            })
+            const url = URL.createObjectURL(data)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = item.attachment.filename
+            link.click()
+            setTimeout(() => URL.revokeObjectURL(url), 1000)
+        } catch (error) {
+            const status = axios.isAxiosError(error) ? error.response?.status : undefined
+            setAttachmentError(status === 410 ? 'This attachment is no longer available.' : 'Could not download this attachment. Try again shortly.')
+        } finally { setDownloading('') }
     }
 
     const reply = async () => {
         if (!activePhone || !draft.trim()) return
         setSaving(true)
         try {
-            await axios.post('/api/admin/waba/inbox/reply', { phone: activePhone, text: draft.trim(), accountId })
+            await axios.post('/api/admin/waba/inbox/reply', { phone: activePhone, text: draft.trim(), accountId: receivingId })
             setDraft('')
             await Promise.all([loadThread(activePhone), loadInbox()])
         } catch (error: any) {
@@ -134,9 +206,10 @@ export function WabaInbox({
         setSaving(true)
         setError('')
         try {
-            await axios.post('/api/admin/waba/inbox/template', { phone, templateId: id, accountId })
+            await axios.post('/api/admin/waba/inbox/template', { phone, templateId: id, accountId: receivingId })
             setTemplateId(id)
-            setActivePhone(phone)
+            threadIdentity.current = `${receivingId || ''}:${phone}`
+            setThread({ phone, accountId: receivingId })
             setNewPhone('')
             await Promise.all([loadThread(phone), loadInbox()])
         } catch (err: any) {
@@ -154,7 +227,7 @@ export function WabaInbox({
         return <p className="rounded-xl bg-amber-50 p-6 text-sm font-semibold text-amber-800">Connect WhatsApp first. Incoming chats appear here after someone messages the business number.</p>
     }
 
-    const active = conversations.find((item) => item.phone === activePhone)
+    const active = conversations.find((item) => item.phone === activePhone && (item.accountId || accountId) === receivingId)
 
     return (
         <div className="grid min-h-[32rem] overflow-hidden rounded-xl border border-slate-200 bg-white lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_220px]">
@@ -164,7 +237,7 @@ export function WabaInbox({
                     <button type="button" className="text-xs font-semibold text-[#00685d]" onClick={() => loadInbox().catch(() => null)}>Refresh</button>
                 </div>
                 <div className="space-y-3 px-4 pb-4"><label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"><Search size={16} className="shrink-0 text-slate-400" /><input aria-label="Search conversations" className="min-w-0 w-full bg-transparent text-sm outline-none" placeholder="Search conversations…" value={search} onChange={e => setSearch(e.target.value)} /></label><div className="flex gap-2">{[false, true].map(unread => <button key={String(unread)} type="button" aria-pressed={unreadOnly === unread} onClick={() => setUnreadOnly(unread)} className={cn('rounded-full px-3 py-1 text-xs font-medium', unreadOnly === unread ? 'bg-[#00685d] text-white' : 'bg-slate-100 text-slate-600')}>{unread ? 'Unread' : 'All chats'}</button>)}</div></div>
-                {!lastWebhookAt && (
+                {!all && !lastWebhookAt && (
                     <p className="mx-4 mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
                         Meta is not delivering inbound webhooks yet. Replies must go to {displayPhone || 'the Cloud API number'}. In Facebook Developer, switch App Mode to <span className="font-semibold">Live</span>, then reply once from a personal WhatsApp.
                     </p>
@@ -174,8 +247,8 @@ export function WabaInbox({
                         <button
                             key={item.id}
                             type="button"
-                            onClick={() => openThread(item.phone)}
-                            className={cn('flex w-full flex-col gap-1 border-t border-slate-50 px-4 py-3 text-left', activePhone === item.phone ? 'border-l-4 border-l-[#00685d] bg-emerald-50' : 'hover:bg-slate-50')}
+                            disabled={saving} onClick={() => openThread(item.phone, item.accountId || accountId)}
+                            className={cn('flex w-full flex-col gap-1 border-t border-slate-50 px-4 py-3 text-left', active?.id === item.id ? 'border-l-4 border-l-[#00685d] bg-emerald-50' : 'hover:bg-slate-50')}
                         >
                             <div className="flex items-center justify-between gap-2"><span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-800">{(item.displayName || item.phone).slice(0, 2).toUpperCase()}</span>
                                 <p className="truncate text-sm font-semibold text-slate-900">{item.displayName || item.phone}</p>
@@ -183,30 +256,44 @@ export function WabaInbox({
                                     <span className="rounded-full bg-[#00685d] px-2 py-0.5 text-[10px] font-semibold text-white">{item.unreadCount}</span>
                                 )}
                             </div>
+                            <p className="truncate text-xs font-medium text-[#00685d]">{businessName(item.accountId)}</p>
                             <p className="truncate text-xs font-semibold text-slate-500">{item.lastMessage || 'No messages yet'}</p>
                             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{formatWhen(item.lastMessageAt)}</p>
                         </button>
                     ))}
                     {!conversations.length && (
                         <p className="px-4 py-8 text-sm font-semibold text-slate-500">
-                            No inbound chats yet. Reply must come to <span className="font-semibold text-slate-900">{displayPhone || 'the Cloud API number'}</span>
-                            {lastWebhookAt ? ` · last Meta webhook ${formatWhen(lastWebhookAt)}${lastWebhookFields ? ` (${lastWebhookFields})` : ''}` : ' · Meta has not delivered a customer message webhook yet'}
+                            {all ? 'No inbound chats across the connected numbers. ' : 'No inbound chats yet. Reply must come to '} {!all && <span className="font-semibold text-slate-900">{displayPhone || 'the Cloud API number'}</span>}
+                            {all ? '' : lastWebhookAt ? ` · last Meta webhook ${formatWhen(lastWebhookAt)}${lastWebhookFields ? ` (${lastWebhookFields})` : ''}` : ' · Meta has not delivered a customer message webhook yet'}
                             . Start a chat with an approved template.
                         </p>
                     )}
                 </div>
             </aside>
-            <section className="flex min-h-[24rem] flex-col">
+            <section className="flex min-h-[24rem] min-w-0 flex-col">
                 {activePhone ? (
                     <>
                         <div className="border-b border-slate-200 px-5 py-4">
                             <p className="font-semibold text-slate-900">{active?.displayName || activePhone}</p>
+                            <p className="mt-1 text-xs font-medium text-[#00685d]">Business number · {businessName(receivingId)}</p>
                             <p className="text-xs font-semibold text-slate-500">{activePhone}{active?.optedOut ? ' · opted out' : canReply ? ' · 24-hour window open' : ' · send a template to restart'}</p>
                         </div>
-                        <div ref={threadRef} className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-5">
+                        <div ref={threadRef} className="max-h-[34rem] flex-1 space-y-3 overflow-y-auto bg-slate-50 p-5">
                             {messages.map((item) => (
                                 <div key={item.id} className={cn('max-w-[80%] rounded-lg px-4 py-3 text-sm font-semibold', item.direction === 'OUTBOUND' ? 'ml-auto bg-[#00685d] text-white' : 'bg-white text-slate-800 shadow-sm')}>
-                                    <p className="whitespace-pre-wrap">{item.body}</p>
+                                    {item.body && item.body !== '[contacts]' && !/^\[(image|audio|video|sticker|document)\]$/.test(item.body) && <p className="whitespace-pre-wrap break-words">{item.body}</p>}
+                                    {item.attachment ? <div className="mt-1 rounded-lg border border-slate-200 bg-white p-3 text-slate-800">
+                                        <p className="flex items-center gap-2 break-all"><FileText size={16} className="shrink-0" />{item.attachment.filename}</p>
+                                        {+new Date(item.attachment.expiresAt) > Date.now() ? <button type="button" disabled={!!downloading} onClick={() => void downloadAttachment(item)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#00685d]"><Download size={14} />{downloading === item.id ? 'Downloading…' : 'Download attachment'}</button>
+                                            : <p className="mt-2 text-xs text-slate-500">Download expired after 24 hours.</p>}
+                                    </div> : ['image', 'document', 'audio', 'video', 'sticker'].includes(item.type) && <p className="text-xs opacity-80">Attachment unavailable.</p>}
+                                    {item.sharedContacts?.map((contact, index) => <div key={index} className="mt-2 space-y-1 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800">
+                                        <p className="flex items-center gap-2 text-xs text-slate-500"><UserRound size={15} /> Shared contact</p>
+                                        <p className="break-words font-semibold">{contact.name}</p>
+                                        {contact.company && <p className="break-words">{contact.company}</p>}
+                                        {contact.phones.map((phone, index) => <p key={index} className="break-all font-normal">{phone}</p>)}
+                                        {contact.emails.map((email, index) => <p key={index} className="break-all font-normal">{email}</p>)}
+                                    </div>)}
                                     <p className={cn('mt-1 text-[10px] font-bold uppercase tracking-wide', item.direction === 'OUTBOUND' ? 'text-white/70' : 'text-slate-400')}>
                                         {item.direction === 'OUTBOUND' ? 'You' : 'Customer'} · {formatWhen(item.createdAt)}{item.status ? ` · ${item.status}` : ''}
                                     </p>
@@ -215,6 +302,7 @@ export function WabaInbox({
                             {!messages.length && <p className="text-sm font-semibold text-slate-400">No messages in this thread yet.</p>}
                         </div>
                         <div className="space-y-3 border-t border-slate-200 p-4">
+                            {attachmentError && <p role="alert" className="text-sm text-rose-700">{attachmentError}</p>}
                             {error && <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">{error}</p>}
                             <textarea
                                 className="min-h-20 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
@@ -227,7 +315,8 @@ export function WabaInbox({
                                 <button type="button" className={btnClass} disabled={saving || !canReply || !draft.trim()} onClick={reply}>
                                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send reply'}
                                 </button>
-                                <select className="h-11 min-w-[12rem] flex-1 rounded-lg bg-slate-50 px-3 text-sm font-semibold" value={chosenTemplate} onChange={(e) => setTemplateId(e.target.value)}>
+                                <select aria-label="Approved template" className="h-11 min-w-0 flex-1 rounded-lg bg-slate-50 px-3 text-sm font-semibold" value={chosenTemplate} onChange={(e) => setTemplateId(e.target.value)}>
+                                    {!approved.length && <option value="">No approved template yet</option>}
                                     {approved.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                                 </select>
                                 <button type="button" className={ghostClass} disabled={saving || !chosenTemplate} onClick={() => sendTemplate()}>Send template</button>
@@ -238,7 +327,7 @@ export function WabaInbox({
                     <div className="flex flex-1 flex-col justify-center gap-4 p-8">
                         <div>
                             <MessageSquare className="mb-4 text-[#00685d]" size={36} /><p className="text-lg font-semibold text-slate-900">Start a conversation</p>
-                            <p className="mt-1 text-sm font-semibold text-slate-500">WhatsApp only allows a free-text reply for 24 hours after they message you. To start, send an approved template. Order, quote, and warranty events use Flows, the same triggers as email.</p>
+                            <p className="mt-1 text-sm font-semibold text-slate-500">New conversations use {businessName(accountId)}. WhatsApp only allows a free-text reply for 24 hours after they message you. To start, send an approved template. Order, quote, and warranty events use Flows, the same triggers as email.</p>
                         </div>
                         {error && <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">{error}</p>}
                         <input className="h-11 rounded-lg bg-slate-50 px-4 text-sm font-semibold" placeholder="Customer mobile" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} />

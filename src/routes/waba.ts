@@ -1,3 +1,4 @@
+import { downloadWabaInboxAttachment } from '../lib/wabaInboxDownload'
 import { Router } from 'express'
 import crypto from 'crypto'
 import assistantRouter from './wabaAssistant'
@@ -244,12 +245,21 @@ router.post('/test', requireAdmin, async (req, res) => {
 
 router.get('/inbox', requireAdmin, async (req, res) => {
     try {
-        const conversations = await listWabaConversations(String(req.query.accountId || ''))
-        res.json({ success: true, conversations, unread: conversations.reduce((sum: number, item: any) => sum + (item.unreadCount || 0), 0) })
+        const all = req.query.scope === 'all'
+        const accountId = String(req.query.accountId || '')
+        const [conversations, templates] = await Promise.all([
+            listWabaConversations(accountId, all),
+            accountId ? prisma.whatsAppTemplate.findMany({
+                where: { accountId, status: 'APPROVED' }, select: { id: true, name: true, status: true },
+            }) : undefined,
+        ])
+        res.json({ success: true, conversations, templates, unread: conversations.reduce((sum: number, item: any) => sum + (item.unreadCount || 0), 0) })
     } catch (error: any) {
         res.status(500).json({ error: error.message || 'Could not load inbox' })
     }
 })
+
+router.get('/inbox/attachments/:messageId', requireAdmin, downloadWabaInboxAttachment)
 
 router.get('/inbox/:phone', requireAdmin, async (req, res) => {
     try {
@@ -286,6 +296,9 @@ router.post('/inbox/template', requireAdmin, async (req, res) => {
     try {
         const template = await prisma.whatsAppTemplate.findUnique({ where: { id: String(req.body?.templateId || '') } })
         if (!template) return res.status(404).json({ error: 'Template not found' })
+        if (req.body?.accountId && template.accountId !== req.body.accountId) {
+            return res.status(400).json({ error: 'Choose a template for the receiving business number.' })
+        }
         if (String(template.status).toUpperCase() !== 'APPROVED') {
             return res.status(400).json({ error: 'Only APPROVED templates can be sent' })
         }

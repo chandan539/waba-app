@@ -423,7 +423,7 @@ export function WabaBoard() {
             {tab === 'assistant' && <WabaAssistant key={status.id} accountId={status.id} />}
 
             {tab === 'inbox' && (
-                <WabaInbox key={status.id} connected={status.connected} templates={templates} accountId={status.id} displayPhone={status.displayPhone} lastWebhookAt={status.lastWebhookAt} lastWebhookFields={status.lastWebhookFields} />
+                <WabaInbox key={status.id} accounts={accounts} connected={status.connected} templates={templates} accountId={status.id} displayPhone={status.displayPhone} lastWebhookAt={status.lastWebhookAt} lastWebhookFields={status.lastWebhookFields} />
             )}
 
             {tab === 'flows' && (

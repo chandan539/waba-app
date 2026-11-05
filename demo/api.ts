@@ -47,7 +47,8 @@ axios.defaults.adapter = async config => {
     const method = config.method || 'get'
     const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data || {}
     const account = accounts.find(item => item.id === state.selected) || accounts[0]
-    const current = workspace(account.id)
+    const inboxAccountId = String(config.params?.accountId || body.accountId || account.id)
+    const current = workspace(config.url?.includes('/inbox') ? inboxAccountId : account.id)
     const path = url.pathname.replace(/^\/api\/admin\/waba/, '')
     const fail = (message: string): never => {
         throw new AxiosError(message, 'ERR_BAD_REQUEST', config, undefined, { data: { error: message }, status: 400, statusText: 'Demo request', headers: {}, config })
@@ -83,18 +84,34 @@ axios.defaults.adapter = async config => {
         current.handovers = current.handovers.filter(item => item.phone !== body.phone)
         if (body.handover) current.handovers.push({ id: crypto.randomUUID(), phone: body.phone })
     } else if (path === '/inbox') {
-        data = { conversations: people.map(person => ({ ...person, lastMessageAt: now() })) }
+        const ids = config.params?.scope === 'all' ? accounts.map(item => item.id) : [inboxAccountId]
+        data = { templates, conversations: ids.flatMap((id, index) => people.slice(0, index === 0 ? 3 : 1).map(person => ({
+            ...person, id: `${id}:${person.id}`, accountId: id, lastMessageAt: now(),
+        }))) }
     } else if (path === '/inbox/read') {
         // Read receipts are simulated.
     } else if (path === '/inbox/reply' || path === '/inbox/template') {
         const replies = current.replies[body.phone] ||= []
         replies.push({ id: crypto.randomUUID(), direction: 'OUTBOUND', type: 'text', body: body.text || templates.find(item => item.id === body.templateId)?.bodyText, status: 'sent', createdAt: now() })
+    } else if (path.startsWith('/inbox/attachments/') && method === 'get') {
+        const filename = path.endsWith('/demo-pdf') ? 'sample-brief.pdf' : path.endsWith('/demo-image') ? 'sample-image.png' : null
+        if (!filename) fail('Demo attachment not found.')
+        data = await fetch(`/samples/${filename}`).then(result => {
+            if (!result.ok) throw new Error('Demo attachment unavailable.')
+            return result.blob()
+        })
     } else if (path.startsWith('/inbox/') && method === 'get') {
         const phone = decodeURIComponent(path.slice('/inbox/'.length))
         const person = people.find(item => item.phone === phone)
-        data = { contact: person && { ...person, unreadCount: 0 }, canReply: true, messages: [
+        const expiresAt = new Date(Date.now() + 86400000).toISOString()
+        const attachmentMessages = person?.id === 'c1' ? [
+            { id: 'demo-pdf', direction: 'INBOUND', type: 'document', body: 'Here is our sample project brief.', createdAt: now(), attachment: { filename: 'sample-brief.pdf', expiresAt } },
+            { id: 'demo-image', direction: 'INBOUND', type: 'image', body: 'And a sample image.', createdAt: now(), attachment: { filename: 'sample-image.png', expiresAt } },
+            { id: 'demo-contact', direction: 'INBOUND', type: 'contacts', body: '[contacts]', createdAt: now(), sharedContacts: [{ name: 'Jordan Lee', company: 'Example Studio', phones: ['+1 202-555-0190'], emails: ['jordan@example.com'] }] },
+        ] : []
+        data = { contact: person && { ...person, unreadCount: 0 }, canReply: true, templates, messages: [
             ...(person ? [{ id: 'initial', direction: 'INBOUND', type: 'text', body: person.lastMessage, createdAt: now() }] : []),
-            ...(current.replies[phone] || []),
+            ...attachmentMessages, ...(current.replies[phone] || []),
         ] }
     } else if (path === '/flows' && method === 'get') {
         data = { flows: current.flows }
