@@ -269,7 +269,7 @@ router.get('/inbox/attachments/:messageId', requireAdmin, downloadWabaInboxAttac
 
 router.get('/inbox/:phone', requireAdmin, async (req, res) => {
     try {
-        const thread = await listWabaThread(String(req.params.phone || ''), String(req.query.accountId || ''), typeof req.query.before === 'string' ? req.query.before : undefined)
+        const thread = await listWabaThread(String(req.params.phone || ''), String(req.query.accountId || ''), typeof req.query.before === 'string' ? req.query.before : undefined, req.query.archive === 'true')
         res.json({ success: true, ...thread })
     } catch (error: any) {
         res.status(400).json({ error: error.message || 'Could not load conversation' })

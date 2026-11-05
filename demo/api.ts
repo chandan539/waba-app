@@ -86,7 +86,7 @@ axios.defaults.adapter = async config => {
     } else if (path === '/inbox') {
         const ids = config.params?.scope === 'all' ? accounts.map(item => item.id) : [inboxAccountId]
         const search = String(config.params?.search || '').trim().toLowerCase()
-        const start = (Number(config.params?.page || 1) - 1) * 20
+        const start = (Number(config.params?.page || 1) - 1) * 25
         const rows = ids.flatMap((id, index) => people.slice(0, index === 0 ? 3 : 1).map(person => ({
             ...person, id: `${id}:${person.id}`, accountId: id,
             lastMessageAt: new Date(Date.now() - index * 86400000).toISOString(),
@@ -94,7 +94,7 @@ axios.defaults.adapter = async config => {
             (!config.params?.unread || person.unreadCount > 0) &&
             `${person.displayName} ${person.phone} ${person.lastMessage}`.toLowerCase().includes(search),
         )
-        data = { templates, conversations: rows.slice(start, start + 20), hasNext: rows.length > start + 20 }
+        data = { templates, conversations: rows.slice(start, start + 25), hasNext: rows.length > start + 25 }
     } else if (path === '/inbox/read') {
         // Read receipts are simulated.
     } else if (path === '/inbox/reply' || path === '/inbox/template') {

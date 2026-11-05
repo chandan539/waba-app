@@ -498,8 +498,8 @@ describe.skipIf(!databaseUrl)('assistant with real Postgres and mocked external 
         expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 
-    it('paginates all stored contacts in batches of 20 and searches beyond the first page', async () => {
-        await prisma.whatsAppContact.createMany({ data: Array.from({ length: 44 }, (_, i) => ({
+    it('paginates all stored contacts in batches of 25 and searches beyond the first page', async () => {
+        await prisma.whatsAppContact.createMany({ data: Array.from({ length: 54 }, (_, i) => ({
             accountId, phone: `919123450${String(i).padStart(3, '0')}`,
             displayName: `Customer ${i}`, lastMessageAt: new Date(Date.now() - i * 86400000),
         })) })
@@ -510,9 +510,9 @@ describe.skipIf(!databaseUrl)('assistant with real Postgres and mocked external 
         const pages = await Promise.all([1, 2, 3].map(page =>
             request(app).get('/waba/inbox').query({ accountId, page }).expect(200),
         ))
-        expect(pages.map(result => result.body.conversations.length)).toEqual([20, 20, 5])
+        expect(pages.map(result => result.body.conversations.length)).toEqual([25, 25, 5])
         expect(pages.map(result => result.body.hasNext)).toEqual([true, true, false])
-        expect(new Set(pages.flatMap(result => result.body.conversations.map((row: any) => row.id))).size).toBe(45)
+        expect(new Set(pages.flatMap(result => result.body.conversations.map((row: any) => row.id))).size).toBe(55)
         const match = await request(app).get('/waba/inbox').query({ accountId, search: 'legacy import' }).expect(200)
         expect(match.body.conversations).toEqual([expect.objectContaining({ lastMessage: 'Legacy import' })])
     })
@@ -529,6 +529,26 @@ describe.skipIf(!databaseUrl)('assistant with real Postgres and mocked external 
         expect(third.body.olderCursor).toBeNull()
         expect(third.body.messages[0].body).toBe('Message 0')
         expect(new Set([first, second, third].flatMap(result => result.body.messages.map((row: any) => row.id))).size).toBe(117)
+    })
+
+    it('recovers unassigned and former-number chats without attaching them to the current number', async () => {
+        const createdAt = new Date('2025-01-01T10:00:00Z')
+        await prisma.whatsAppMessage.createMany({ data: [
+            { phone, accountId: null, direction: 'INBOUND', body: 'Unassigned history', createdAt },
+            { phone, accountId: 'old-number', direction: 'INBOUND', body: 'Former number history', createdAt },
+            { phone, accountId, direction: 'INBOUND', body: 'Current number', createdAt },
+        ] })
+        const all = await request(app).get('/waba/inbox').query({ scope: 'all' }).expect(200)
+        expect(all.body.conversations.filter((row: any) => row.archived).map((row: any) => row.accountId))
+            .toEqual(expect.arrayContaining([null, 'old-number']))
+        const scoped = await request(app).get('/waba/inbox').query({ accountId }).expect(200)
+        expect(scoped.body.conversations).toHaveLength(1)
+        const legacy = await request(app).get(`/waba/inbox/${phone}`).query({ archive: true }).expect(200)
+        expect(legacy.body.messages.map((row: any) => row.body)).toEqual(['Unassigned history'])
+        expect(legacy.body.canReply).toBe(false)
+        const former = await request(app).get(`/waba/inbox/${phone}`).query({ archive: true, accountId: 'old-number' }).expect(200)
+        expect(former.body.messages.map((row: any) => row.body)).toEqual(['Former number history'])
+        await request(app).get(`/waba/inbox/${phone}`).query({ archive: true, accountId }).expect(400)
     })
 
 })

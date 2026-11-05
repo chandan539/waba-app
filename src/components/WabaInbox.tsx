@@ -9,6 +9,7 @@ type Conversation = {
     id: string
     phone: string
     accountId?: string | null
+    archived?: boolean
     displayName?: string | null
     lastMessage?: string | null
     lastMessageAt?: string | null
@@ -57,14 +58,14 @@ export function WabaInbox(props: InboxProps) {
     const numbers = (props.accounts || []).filter(account => account.connected)
     const [filter, setFilter] = useState('all')
     const selected = numbers.find(account => account.id === filter)
-    const all = !selected && numbers.length > 0
+    const all = !selected
     const sendingAccount = selected || numbers.find(number => number.id === props.accountId) || numbers[0]
     const sendingId = sendingAccount?.id || props.accountId
     return <div className="min-w-0 space-y-3">
         <label className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold">
             Business number
             <select aria-label="Inbox business number" value={selected?.id || 'all'} onChange={e => setFilter(e.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal">
-                <option value="all">All connected numbers ({numbers.length || Number(props.connected)})</option>
+                <option value="all">All numbers and archived chats ({numbers.length || Number(props.connected)})</option>
                 {numbers.map(account => <option key={account.id} value={account.id}>{numberLabel(account)}</option>)}
             </select>
         </label>
@@ -87,10 +88,11 @@ function InboxThreads({
     const activeListKey = useRef(listKey)
     activeListKey.current = listKey
     const [conversations, setConversations] = useState<Conversation[]>([])
-    const [thread, setThread] = useState<{ phone: string; accountId?: string | null; displayName?: string | null }>()
+    const [thread, setThread] = useState<{ phone: string; accountId?: string | null; displayName?: string | null; archived?: boolean }>()
     const threadIdentity = useRef('')
     const activePhone = thread?.phone || ''
-    const receivingId = thread?.accountId || accountId
+    const archived = Boolean(thread?.archived)
+    const receivingId = archived ? thread?.accountId || undefined : thread?.accountId || accountId
     const [numberTemplates, setNumberTemplates] = useState<InboxProps['templates']>()
     const [threadTemplates, setThreadTemplates] = useState<InboxProps['templates']>()
     const [attachmentError, setAttachmentError] = useState('')
@@ -131,10 +133,10 @@ function InboxThreads({
         setNumberTemplates(res.data.templates)
     }
 
-    const loadThread = async (phone: string, id = receivingId) => {
+    const loadThread = async (phone: string, id = receivingId, archive = archived) => {
         if (!phone) return
-        const key = `${id || ''}:${phone}`
-        const res = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(phone)}`, { params: { accountId: id } })
+        const key = `${archive ? 'archive:' : ''}${id || ''}:${phone}`
+        const res = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(phone)}`, { params: { accountId: id, archive } })
         if (threadIdentity.current !== key) return
         const incoming: Message[] = res.data.messages || []
         const pane = threadRef.current
@@ -152,7 +154,7 @@ function InboxThreads({
         })
         setThreadTemplates(res.data.templates)
         setCanReply(!!res.data.canReply)
-        if ((res.data.contact?.unreadCount || 0) > 0) {
+        if (!archive && (res.data.contact?.unreadCount || 0) > 0) {
             await axios.post('/api/admin/waba/inbox/read', { phone, accountId: id }).catch(() => null)
             setConversations(prev => prev.map(item => item.phone === phone && (item.accountId || accountId) === id ? { ...item, unreadCount: 0 } : item))
         }
@@ -165,7 +167,7 @@ function InboxThreads({
         setHistoryError('')
         try {
             const { data } = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(activePhone)}`, {
-                params: { accountId: receivingId, before: olderCursor },
+                params: { accountId: receivingId, before: olderCursor, archive: archived },
             })
             if (threadIdentity.current !== key) return
             const pane = threadRef.current
@@ -205,7 +207,7 @@ function InboxThreads({
             if (activePhone) loadThread(activePhone).catch(() => null)
         }, 8000)
         return () => window.clearInterval(timer)
-    }, [activePhone, receivingId, listKey])
+    }, [activePhone, receivingId, archived, listKey])
 
     useLayoutEffect(() => {
         const pane = threadRef.current
@@ -214,10 +216,11 @@ function InboxThreads({
         if (pane && intent) pane.scrollTop = intent === 'bottom' ? pane.scrollHeight : intent.top + pane.scrollHeight - intent.height
     }, [messages])
 
-    const openThread = async (phone: string, id = accountId, displayName?: string | null) => {
-        threadIdentity.current = `${id || ''}:${phone}`
+    const openThread = async (phone: string, id = accountId, displayName?: string | null, archive = false) => {
+        const key = `${archive ? 'archive:' : ''}${id || ''}:${phone}`
+        threadIdentity.current = key
         didLoadThread.current = false
-        setThread({ phone, accountId: id, displayName })
+        setThread({ phone, accountId: id, displayName, archived: archive })
         setDraft('')
         setError('')
         setAttachmentError('')
@@ -227,13 +230,13 @@ function InboxThreads({
         setHistoryError('')
         setThreadTemplates(undefined)
         setCanReply(false)
-        await loadThread(phone, id).catch(() => {
-            if (threadIdentity.current === `${id || ''}:${phone}`) setError('Could not open this conversation.')
+        await loadThread(phone, id, archive).catch(() => {
+            if (threadIdentity.current === key) setError('Could not open this conversation.')
         })
     }
 
     async function downloadAttachment(item: Message) {
-        if (!item.attachment || !receivingId) return
+        if (!item.attachment || !receivingId || archived) return
         setAttachmentError('')
         setDownloading(item.id)
         try {
@@ -253,7 +256,7 @@ function InboxThreads({
     }
 
     const reply = async () => {
-        if (!activePhone || !draft.trim()) return
+        if (archived || !activePhone || !draft.trim()) return
         setSaving(true)
         try {
             await axios.post('/api/admin/waba/inbox/reply', { phone: activePhone, text: draft.trim(), accountId: receivingId })
@@ -267,6 +270,7 @@ function InboxThreads({
     }
 
     const sendTemplate = async (phone = activePhone) => {
+        if (archived || !connected) return
         const id = chosenTemplate
         if (!phone.trim()) {
             setError('Enter the customer mobile number')
@@ -294,11 +298,11 @@ function InboxThreads({
         return <div className="flex min-h-[30vh] items-center justify-center text-slate-400"><Loader2 className="h-6 w-6 animate-spin" /></div>
     }
 
-    if (!connected) {
+    if (!connected && !all) {
         return <p className="rounded-xl bg-amber-50 p-6 text-sm font-semibold text-amber-800">Connect WhatsApp first. Incoming chats appear here after someone messages the business number.</p>
     }
 
-    const active = conversations.find((item) => item.phone === activePhone && (item.accountId || accountId) === receivingId)
+    const active = conversations.find((item) => item.phone === activePhone && Boolean(item.archived) === archived && (item.accountId || (archived ? undefined : accountId)) === receivingId)
 
     return (
         <div className="grid min-h-[32rem] overflow-hidden rounded-xl border border-slate-200 bg-white lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_220px]">
@@ -313,12 +317,17 @@ function InboxThreads({
                         Meta is not delivering inbound webhooks yet. Replies must go to {displayPhone || 'the Cloud API number'}. In Facebook Developer, switch App Mode to <span className="font-semibold">Live</span>, then reply once from a personal WhatsApp.
                     </p>
                 )}
+                <nav aria-label="Contact pages" className="flex items-center justify-between gap-2 border-t border-slate-200 p-3">
+                    <button type="button" className="rounded border border-slate-200 px-2 py-1 text-xs disabled:opacity-40" disabled={page === 1 || listBusy} onClick={() => setPage(page - 1)}>Previous</button>
+                    <span className="text-xs text-slate-500" aria-live="polite">Page {page} · 25 per page</span>
+                    <button type="button" className="rounded border border-slate-200 px-2 py-1 text-xs disabled:opacity-40" disabled={!hasNext || listBusy} onClick={() => setPage(page + 1)}>Next</button>
+                </nav>
                 <div className="max-h-[22rem] overflow-y-auto lg:max-h-[36rem]">
                     {(listBusy ? [] : conversations).map((item) => (
                         <button
                             key={item.id}
                             type="button"
-                            disabled={saving} onClick={() => openThread(item.phone, item.accountId || accountId, item.displayName)}
+                            disabled={saving} onClick={() => openThread(item.phone, item.archived ? item.accountId ?? '' : item.accountId || accountId, item.displayName, item.archived)}
                             className={cn('flex w-full flex-col gap-1 border-t border-slate-50 px-4 py-3 text-left', active?.id === item.id ? 'border-l-4 border-l-[#00685d] bg-emerald-50' : 'hover:bg-slate-50')}
                         >
                             <div className="flex items-center justify-between gap-2"><span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-800">{(item.displayName || item.phone).slice(0, 2).toUpperCase()}</span>
@@ -327,7 +336,7 @@ function InboxThreads({
                                     <span className="rounded-full bg-[#00685d] px-2 py-0.5 text-[10px] font-semibold text-white">{item.unreadCount}</span>
                                 )}
                             </div>
-                            <p className="truncate text-xs font-medium text-[#00685d]">{businessName(item.accountId)}</p>
+                            <p className="truncate text-xs font-medium text-[#00685d]">{item.archived ? 'Archived history' : businessName(item.accountId)}</p>
                             <p className="truncate text-xs font-semibold text-slate-500">{item.lastMessage || 'No messages yet'}</p>
                             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{formatWhen(item.lastMessageAt)}</p>
                         </button>
@@ -342,18 +351,14 @@ function InboxThreads({
                         </p>
                     )}
                 </div>
-                <nav aria-label="Contact pages" className="flex items-center justify-between gap-2 border-t border-slate-200 p-3">
-                    <button type="button" className="rounded border border-slate-200 px-2 py-1 text-xs disabled:opacity-40" disabled={page === 1 || listBusy} onClick={() => setPage(page - 1)}>Previous</button>
-                    <span className="text-xs text-slate-500" aria-live="polite">Page {page}</span>
-                    <button type="button" className="rounded border border-slate-200 px-2 py-1 text-xs disabled:opacity-40" disabled={!hasNext || listBusy} onClick={() => setPage(page + 1)}>Next</button>
-                </nav>
+
             </aside>
             <section className="flex min-h-[24rem] min-w-0 flex-col">
                 {activePhone ? (
                     <>
                         <div className="border-b border-slate-200 px-5 py-4">
                             <p className="font-semibold text-slate-900">{active?.displayName || thread?.displayName || activePhone}</p>
-                            <p className="mt-1 text-xs font-medium text-[#00685d]">Business number · {businessName(receivingId)}</p>
+                            <p className="mt-1 text-xs font-medium text-[#00685d]">{archived ? 'Archived history · Read only' : `Business number · ${businessName(receivingId)}`}</p>
                             <p className="text-xs font-semibold text-slate-500">{activePhone}{active?.optedOut ? ' · opted out' : canReply ? ' · 24-hour window open' : ' · send a template to restart'}</p>
                         </div>
                         <div ref={threadRef} className="max-h-[34rem] flex-1 space-y-3 overflow-y-auto bg-slate-50 p-5">
@@ -366,8 +371,8 @@ function InboxThreads({
                                     {item.body && item.body !== '[contacts]' && !/^\[(image|audio|video|sticker|document)\]$/.test(item.body) && <p className="whitespace-pre-wrap break-words">{item.body}</p>}
                                     {item.attachment ? <div className="mt-1 rounded-lg border border-slate-200 bg-white p-3 text-slate-800">
                                         <p className="flex items-center gap-2 break-all"><FileText size={16} className="shrink-0" />{item.attachment.filename}</p>
-                                        {+new Date(item.attachment.expiresAt) > Date.now() ? <button type="button" disabled={!!downloading} onClick={() => void downloadAttachment(item)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#00685d]"><Download size={14} />{downloading === item.id ? 'Downloading…' : 'Download attachment'}</button>
-                                            : <p className="mt-2 text-xs text-slate-500">Download expired after 24 hours.</p>}
+                                        {+new Date(item.attachment.expiresAt) > Date.now() && !archived ? <button type="button" disabled={!!downloading} onClick={() => void downloadAttachment(item)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#00685d]"><Download size={14} />{downloading === item.id ? 'Downloading…' : 'Download attachment'}</button>
+                                            : <p className="mt-2 text-xs text-slate-500">{archived ? 'Download unavailable in archived chats.' : 'Download expired after 24 hours.'}</p>}
                                     </div> : ['image', 'document', 'audio', 'video', 'sticker'].includes(item.type) && <p className="text-xs opacity-80">Attachment unavailable.</p>}
                                     {item.sharedContacts?.map((contact, index) => <div key={index} className="mt-2 space-y-1 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800">
                                         <p className="flex items-center gap-2 text-xs text-slate-500"><UserRound size={15} /> Shared contact</p>
@@ -383,7 +388,7 @@ function InboxThreads({
                             ))}
                             {!messages.length && <p className="text-sm font-semibold text-slate-400">No messages in this thread yet.</p>}
                         </div>
-                        <div className="space-y-3 border-t border-slate-200 p-4">
+                        {archived ? <p className="border-t border-slate-200 p-4 text-sm text-slate-500">This history has no active sending number.</p> : <div className="space-y-3 border-t border-slate-200 p-4">
                             {attachmentError && <p role="alert" className="text-sm text-rose-700">{attachmentError}</p>}
                             {error && <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">{error}</p>}
                             <textarea
@@ -403,7 +408,7 @@ function InboxThreads({
                                 </select>
                                 <button type="button" className={ghostClass} disabled={saving || !chosenTemplate} onClick={() => sendTemplate()}>Send template</button>
                             </div>
-                        </div>
+                        </div>}
                     </>
                 ) : (
                     <div className="flex flex-1 flex-col justify-center gap-4 p-8">
@@ -418,7 +423,7 @@ function InboxThreads({
                                 {!approved.length && <option value="">No approved template yet</option>}
                                 {approved.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                             </select>
-                            <button type="button" className={btnClass} disabled={saving || !newPhone.trim() || !approved.length} onClick={() => sendTemplate(newPhone.trim())}>
+                            <button type="button" className={btnClass} disabled={!connected || saving || !newPhone.trim() || !approved.length} onClick={() => sendTemplate(newPhone.trim())}>
                                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send'}
                             </button>
                         </div>

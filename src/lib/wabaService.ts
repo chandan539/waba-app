@@ -807,7 +807,7 @@ export async function recordWabaMessage(input: {
     })
 }
 
-const INBOX_PAGE_SIZE = 20
+const INBOX_PAGE_SIZE = 25
 const THREAD_PAGE_SIZE = 50
 
 export async function listWabaConversations(
@@ -834,41 +834,55 @@ export async function listWabaConversations(
                 CASE WHEN m.direction = 'INBOUND' THEN 1 ELSE 0 END AS "unreadCount",
                 false AS "optedOut"
             FROM "WhatsAppMessage" m
-            WHERE m."accountId" = ANY($1::text[])
+            WHERE ($6::boolean OR m."accountId" = ANY($1::text[]))
               AND NOT EXISTS (
                   SELECT 1 FROM "WhatsAppContact" c
-                  WHERE c."accountId" = m."accountId" AND c.phone = m.phone
+                  WHERE c."accountId" IS NOT DISTINCT FROM m."accountId" AND c.phone = m.phone
               )
             ORDER BY m."accountId", m.phone, m."createdAt" DESC, m.id DESC
         ), conversations AS (
             SELECT id, "accountId", phone, "displayName", "lastMessage",
                    "lastMessageAt", "unreadCount", "optedOut"
-            FROM "WhatsAppContact" WHERE "accountId" = ANY($1::text[])
+            FROM "WhatsAppContact" WHERE ($6::boolean OR "accountId" = ANY($1::text[]))
             UNION ALL
             SELECT * FROM orphan_messages
         )
-        SELECT * FROM conversations
+        SELECT *, COALESCE(NOT ("accountId" = ANY($1::text[])), true) AS archived FROM conversations
         WHERE (NOT $2::boolean OR "unreadCount" > 0)
           AND strpos(lower(concat_ws(' ', "displayName", phone, "lastMessage")), lower($3::text)) > 0
         ORDER BY "lastMessageAt" DESC NULLS LAST, id DESC
         LIMIT $4 OFFSET $5`,
-        ids, Boolean(options.unreadOnly), search, INBOX_PAGE_SIZE + 1, (page - 1) * INBOX_PAGE_SIZE,
+        ids, Boolean(options.unreadOnly), search, INBOX_PAGE_SIZE + 1, (page - 1) * INBOX_PAGE_SIZE, all,
     )
-    return { conversations: rows.slice(0, INBOX_PAGE_SIZE), hasNext: rows.length > INBOX_PAGE_SIZE }
+    const matches = rows as Array<{
+        id: string
+        accountId: string | null
+        phone: string
+        displayName: string | null
+        lastMessage: string | null
+        lastMessageAt: Date | null
+        unreadCount: number
+        optedOut: boolean
+        archived: boolean
+    }>
+    return { conversations: matches.slice(0, INBOX_PAGE_SIZE), hasNext: matches.length > INBOX_PAGE_SIZE }
 }
 
-export async function listWabaThread(phone: string, accountId?: string | null, before?: string) {
+export async function listWabaThread(phone: string, accountId?: string | null, before?: string, archive = false) {
     const normalized = normalizeWabaPhone(phone)
-    const account = await getWabaAccount(accountId)
-    const scopedId = account?.id || accountId || undefined
-    if (!normalized || !scopedId) return { contact: null, messages: [], canReply: false, olderCursor: null }
+    const account = archive
+        ? accountId ? await prisma.whatsAppAccount.findUnique({ where: { id: accountId } }) : null
+        : await getWabaAccount(accountId)
+    if (archive && account?.phoneNumberId && account.accessToken) throw new Error('Open this conversation under its business number.')
+    const scopedId = archive ? accountId || null : account?.id || null
+    if (!normalized || (!archive && !scopedId)) return { contact: null, messages: [], canReply: false, olderCursor: null }
     const scope = { phone: normalized, accountId: scopedId }
     const anchor = before ? await prisma.whatsAppMessage.findFirst({
         where: { ...scope, id: before }, select: { id: true, createdAt: true },
     }) : null
     if (before && !anchor) throw new Error('This history marker is no longer available. Reopen the chat.')
     const [contact, messages, templates] = await Promise.all([
-        prisma.whatsAppContact.findUnique({ where: { accountId_phone: { accountId: scopedId || '', phone: normalized } } }).catch(() => null),
+        prisma.whatsAppContact.findFirst({ where: scope }),
         prisma.whatsAppMessage.findMany({
             where: {
                 ...scope,
@@ -880,7 +894,7 @@ export async function listWabaThread(phone: string, accountId?: string | null, b
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             take: THREAD_PAGE_SIZE + 1,
         }),
-        scopedId ? prisma.whatsAppTemplate.findMany({
+        !archive && scopedId ? prisma.whatsAppTemplate.findMany({
             where: { accountId: scopedId, status: 'APPROVED' },
             select: { id: true, name: true, status: true },
             orderBy: { name: 'asc' },
@@ -898,7 +912,7 @@ export async function listWabaThread(phone: string, accountId?: string | null, b
             }
         }),
         templates,
-        canReply: isWabaCustomerCareOpen(contact?.lastInboundAt),
+        canReply: !archive && isWabaCustomerCareOpen(contact?.lastInboundAt),
     }
 }
 
