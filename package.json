@@ -1,6 +1,6 @@
 {
   "name": "waba-app",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": false,
   "description": "Portable WhatsApp Cloud API module: inbox, templates, event flows, campaigns, and Meta webhook.",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.3.0",
     "@types/supertest": "^6.0.3",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.2",
     "node-cron": "^4.2.0",
     "prisma": "^6.19.0",
     "react-dom": "^19.3.1",
