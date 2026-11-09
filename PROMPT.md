@@ -1,97 +1,14 @@
-# Prompt — add WhatsApp Cloud API (WABA) to this app
+# Add Wabix to a host app using Cursor
 
-Copy everything below the line into Cursor in the **target web app**. Point it at this repo.
-
----
-
-Implement the portable WhatsApp Cloud API module from `https://github.com/chandan539/waba-app`. Copy the source into this project. Do not invent a new WhatsApp stack. Do not commit `.env`, tokens, App Secrets, or System User tokens.
-
-## What to ship
-
-1. Admin page `/admin/waba` with tabs: Inbox, Flows, Templates, Campaigns, Connect Meta.
-2. Public webhook `GET+POST /api/whatsapp/webhook` that Meta can reach over HTTPS.
-3. Admin API under `/api/admin/waba` (settings, Embedded Signup, manual token connect, templates, campaigns, inbox reply, flows).
-4. Prisma models from `prisma/schema.prisma` (or run `prisma/waba.sql` additively).
-5. Three test templates `test_*` submitted as UTILITY, then queued when the host app fires the same trigger types as email (ORDER_PLACED, ORDER_SHIPPED, etc.).
-6. Minute cron that calls `processWhatsAppQueue()`.
-
-## Copy these files
-
-- `src/lib/config.ts`, `adapters.ts`, `waba.ts`, `wabaSignup.ts`, `wabaFlags.ts`, `wabaService.ts`, `cn.ts`
-- `src/routes/waba.ts`, `wabaPublic.ts`
-- `src/components/WabaBoard.tsx`, `WabaInbox.tsx`, `WabaFlows.tsx`
-- `src/examples/express-mount.ts` and `nextjs-admin-page.tsx`
-- `prisma/schema.prisma` + `prisma/waba.sql`
-
-Wire at API boot with `setWabaAdapters({ prisma, requireAdmin, getAudiencePhones })`. Mount JSON with `rawBody` saved only on paths that include `whatsapp/webhook`.
-
-## Env (no secrets in git)
-
-```
-WABA_WEBHOOK_URL=https://<public-api-host>/api/whatsapp/webhook
-WABA_BRAND=<brand name>
-WABA_SHOP_URL=https://<shop-host>
-WABA_ADMIN_ORIGIN=https://<admin-host>
-WABA_API_ORIGIN=https://<public-api-host>
-WABA_DEFAULT_CC=91
-WABA_GRAPH_VERSION=v26.0
-```
-
-Meta App ID, App Secret, verify token, and Cloud API access token are saved in `WhatsAppAccount` from the admin Connect tab. Never hardcode them.
-
-## Host hooks you must add
-
-- `requireAdmin` — same auth as other admin routes.
-- `getAudiencePhones(audience)` — return `{ phone, userEmail }[]` for `ORDERS`, `LEADS`, or `BOTH`.
-- After checkout / ship / deliver / quote / warranty, call:
-
-```ts
-await triggerWhatsAppFlow('ORDER_PLACED', {
-  phone: order.contactPhone,
-  name: order.contactName,
-  email: order.contactEmail,
-  orderId: order.orderNumber,
-  total: String(order.total),
-})
-```
-
-Only APPROVED templates send. If the template is still PENDING, the flow logs `WABA_FLOW_SKIP` and waits.
-
-## Meta console (required for inbound)
-
-Inbound is webhook-only. Cloud API has no pull inbox.
-
-1. Facebook app → WhatsApp → Configuration.
-2. Callback URL = `WABA_WEBHOOK_URL`. Verify token = the token stored on `WhatsAppAccount`.
-3. Subscribe field `messages` (plus template status + account_update). Do **not** subscribe `message_echoes` (Meta permission error).
-4. Subscribe the WABA with `POST /{waba-id}/subscribed_apps`.
-5. Do **not** set a phone-number `override_callback_uri`. Phone override beats the app callback and often black-holes inbound.
-6. App Mode must be **Live** for real customer numbers. Dev mode often delivers only testers / the Meta test `+1 555` number.
-7. In API Setup, select the **production Cloud API number**, not Meta’s test number.
-8. Add admin + API hosts to App Domains and Valid OAuth Redirect URIs: `https://<admin-host>/admin/waba`.
-
-## Hard rules learned from production
-
-- `GET /admin/waba` must call `maintainWabaConnection(false)`, never `force=true`. Re-POSTing `/{app-id}/subscriptions` on every page load makes Meta re-verify and drop inbound POSTs.
-- Subscribe app webhooks only when callback URL or field list actually changed.
-- Keep `rawBody` for `x-hub-signature-256`. If the payload is a WhatsApp `entry` object and HMAC fails, still apply it (log `WABA_WEBHOOK_BAD_SIGNATURE`). Only 403 unsigned empty probes.
-- Parse `value.messages`, `message_echoes`, and `history`. If `from` is missing, fall back to `contacts[0].wa_id`.
-- Free-text reply only for 24 hours after last inbound. Otherwise send an APPROVED template.
-- Template send must fill every `{{n}}` from `variableKeys` (`#132000` if a body param is missing).
-- Never include `message_echoes` in the subscribe field list.
-- Do not change offer-letter / legal copy in the host app. This module is WhatsApp only.
-
-## Done when
-
-- Admin Connect shows Cloud API CONNECTED for the real business number.
-- `Add 3 test templates` submits only three `test_*` examples on explicit request and creates paused example flows. Maintenance must not submit templates or reactivate flows.
-- A personal WhatsApp can message the business number and the thread appears in Inbox within a few seconds.
-- Outbound template + 24h free reply both store in `WhatsAppMessage`.
-- Order/event code calls `triggerWhatsAppFlow` and the queue sends after Meta approves the template.
+Copy the instructions below into Cursor in the host repository.
 
 ---
 
+Integrate the WhatsApp module from `https://github.com/chandan539/waba-app`. Read its **Add Wabix to another app** section in `README.md`, `.env.example`, and `docs/ASSISTANT.md`. Use a pinned Git dependency or submodule. If vendoring is required, copy the complete `src/` and `prisma/` directories.
 
-## Business assistant integration (required for the complete module)
-
-Read `docs/ASSISTANT.md` and copy all assistant library, route and component files too. Merge every model in `prisma/schema.prisma`; apply `prisma/assistant.sql` after the original schema if using SQL; regenerate the host Prisma client. Run `processAssistantJobs()` every 2–5 seconds in a durable worker alongside the existing minute queue. Mount before JSON body parsers and require real admin authorization. Configure the host Tailwind source scan. The new AI assistant screen handles setup, business knowledge, menus, leads, bookings, handover and diagnostics. Defaults are disabled/TEST with no allowed phones; AI and booking are optional. Use server secrets for Claude, Razorpay and Google Calendar; see `src/examples/assistant-adapters.ts`. Never auto-enable live mode or submit templates during connection maintenance. No Python sidecar or local JSON data files are required.
+- Merge every Wabix Prisma model, regenerate Prisma Client, and apply the additive migrations. Preserve existing WhatsApp rows and other host data.
+- Use `mountWaba(app, { prisma, requireAdmin })` for Express. Mount before general JSON middleware so Meta signatures use the original bytes. If this host uses a different server, wire the same routers, admin authorization, raw-body handling, and background jobs.
+- Render `WabaModule` on a protected admin page for new installations. For an existing installation, keep its board and enable Channels with `<WabaBoard channels />` when requested. Pass the API base and authenticated Axios client through `WabaModule` or `WabaHost` as needed. Include the Wabix components in the Tailwind source scan.
+- Configure this host's public HTTPS webhook URL and exact Meta OAuth callback. The callback must render the board. Enter Meta credentials and Embedded Signup configuration ID in Wabix **Settings**. Keep credentials out of Git and confirm signature validation and delivery with an inbound test message.
+- Reuse the host's authenticated admin middleware and wire optional audience lookup, event triggers, AI, payments, and calendar through Wabix's adapters. Run the assistant and queue workers in an always-on process. Keep the assistant in test mode until configured and verified.
+- Submit the three test templates only through the explicit admin action. Confirm the existing inbox, templates, automation, campaigns, analytics, and update settings are available in the host.

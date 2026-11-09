@@ -10,9 +10,9 @@ const directory = path.resolve('node_modules/.cache/waba-ui')
 await mkdir(directory, { recursive: true })
 await writeFile(path.join(directory, 'input.css'), '@import "tailwindcss";\n@source "../../../src/components";\n')
 execFileSync('node_modules/.bin/tailwindcss', ['-i', path.join(directory, 'input.css'), '-o', path.join(directory, 'style.css')], { stdio: 'inherit' })
-await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {WabaBoard} from './src/components/WabaBoard'; createRoot(document.getElementById('root')).render(<WabaBoard/>);`, resolveDir: process.cwd(), loader: 'tsx' }, jsx: 'automatic', bundle: true, platform: 'browser', outfile: path.join(directory, 'app.js') })
+await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {WabaBoard} from './src/components/WabaBoard'; import {WabaModule} from './src/components/WabaModule'; createRoot(document.getElementById('root')).render(location.hash === '#module' ? <WabaModule apiBase="/api/tools/wabix"/> : <WabaBoard/>);`, resolveDir: process.cwd(), loader: 'tsx' }, jsx: 'automatic', bundle: true, platform: 'browser', outfile: path.join(directory, 'app.js') })
 await writeFile(path.join(directory, 'index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body style="margin:0;background:#f7f9fc;padding:16px"><div id="root"></div><script src="/app.js"></script></body></html>')
-const server = createServer(async (req, res) => { try { const name = req.url === '/' ? 'index.html' : req.url.slice(1); if (!['index.html', 'app.js', 'style.css'].includes(name)) { res.writeHead(404).end(); return } res.setHeader('content-type', name.endsWith('.js') ? 'application/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html'); res.end(await readFile(path.join(directory, name))) } catch { res.writeHead(404).end() } })
+const server = createServer(async (req, res) => { try { const pathname = new URL(req.url, 'http://localhost').pathname; const name = ['/', '/tools/whatsapp'].includes(pathname) ? 'index.html' : pathname.slice(1); if (!['index.html', 'app.js', 'style.css'].includes(name)) { res.writeHead(404).end(); return } res.setHeader('content-type', name.endsWith('.js') ? 'application/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html'); res.end(await readFile(path.join(directory, name))) } catch { res.writeHead(404).end() } })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const browser = await chromium.launch({ ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) })
 try {
@@ -66,6 +66,40 @@ try {
     await page.getByRole('button', { name: 'Update app', exact: true }).click()
     await page.getByText('Update to v1.2.0 was sent', { exact: false }).waitFor()
     assert.equal(updateRequested, true)
+    const channels = [
+        { id: 'first', displayName: 'Front Desk', displayPhone: '+91 90000 00001', connected: true },
+        { id: 'second', displayName: 'Sales', displayPhone: '+91 90000 00002', connected: true },
+    ]
+    let selected = 'first'
+    await page.route('**/api/tools/wabix**', async route => {
+        const pathname = new URL(route.request().url()).pathname
+        if (pathname === '/api/tools/wabix/accounts/select') selected = route.request().postDataJSON().accountId
+        const accounts = channels.map(account => ({ ...account, isSelected: account.id === selected }))
+        await route.fulfill({ json: { status: {
+            ...accounts.find(account => account.isSelected), accounts,
+            oauthPath: '/tools/whatsapp', metaAppId: 'test-app', embeddedSignupConfigId: 'test-config', hasAppSecret: true,
+        } } })
+    })
+    await page.goto(`http://127.0.0.1:${server.address().port}/#module`)
+    await page.reload()
+    await page.getByRole('heading', { name: 'Channels', exact: true }).waitFor()
+    await page.getByLabel('Active channel').selectOption('second')
+    await page.locator('a[href="https://wa.me/919000000002"]').waitFor()
+    await page.getByRole('link', { name: 'Download QR' }).waitFor()
+    assert.equal(await page.getByRole('link', { name: 'Download QR' }).getAttribute('download'), 'whatsapp-919000000002.png')
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false)
+    await page.screenshot({ path: path.join(directory, 'channels-mobile.png'), fullPage: true })
+    await page.context().route('https://www.facebook.com/**/dialog/oauth?**', async route => {
+        const params = new URL(route.request().url()).searchParams
+        const callback = new URL(params.get('redirect_uri'))
+        assert.equal(callback.pathname, '/tools/whatsapp')
+        assert.ok(params.get('state'))
+        callback.searchParams.set('state', params.get('state'))
+        callback.searchParams.set('error_description', 'Meta stopped this test signup')
+        await route.fulfill({ status: 302, headers: { location: callback.href } })
+    })
+    await page.getByRole('button', { name: 'Connect another number' }).click()
+    await page.getByRole('alert').filter({ hasText: 'Meta stopped this test signup' }).waitFor()
     assert.deepEqual(errors, [])
     console.log(`UI checks passed. Screenshots: ${directory}`)
 } finally { await browser.close(); server.close() }

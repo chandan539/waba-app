@@ -13,6 +13,7 @@ const options = [
     ['human', 'A team member has been requested. The connected app pauses automatic replies for this conversation.'],
 ] as const
 function Demo() {
+    const [channels, setChannels] = useState(false)
     const [open, setOpen] = useState(false)
     const [text, setText] = useState('')
     const [step, setStep] = useState('')
@@ -37,9 +38,12 @@ function Demo() {
     return <>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-white px-4 py-3">
             <p className="text-sm text-slate-600"><strong className="text-[#00685d]">Interactive demo</strong> · Sample data and browser-only changes. No live WhatsApp, AI or payments.</p>
+            <div className="flex flex-wrap gap-2">
+            <button type="button" className="rounded-lg border border-emerald-200 px-4 py-2 text-sm font-semibold text-[#00685d]" onClick={() => setChannels((value) => !value)}>{channels ? 'Back to the classic preview' : 'Preview Channels'}</button>
             <button type="button" className="flex items-center gap-2 rounded-lg bg-[#00685d] px-4 py-2 text-sm font-semibold text-white" onClick={() => setOpen(true)}><Bot size={17} /> Try the customer chat</button>
+            </div>
         </div>
-        <WabaBoard />
+        <WabaBoard key={String(channels)} channels={channels} />
         {open && <section role="dialog" aria-label="WhatsApp customer preview" className="fixed inset-x-3 bottom-3 z-20 flex max-h-[85dvh] flex-col overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-2xl sm:inset-x-auto sm:right-5 sm:w-[390px]">
             <header className="flex items-center justify-between bg-[#00685d] p-4 text-white"><div><h2 className="font-semibold">WhatsApp customer preview</h2><p className="text-xs text-emerald-100">Scripted demo · {demoSettings().businessName}</p></div><button aria-label="Close preview" onClick={() => setOpen(false)}><X size={20} /></button></header>
             <div className="space-y-2 overflow-y-auto bg-[#f2f7f4] p-4">

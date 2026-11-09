@@ -27,9 +27,13 @@ export const wabaConfig = {
 }
 
 export function resolveWabaWebhookUrl() {
-    if (wabaConfig.webhookUrl) return wabaConfig.webhookUrl
-    if (wabaConfig.apiOrigin && !/localhost|127\.0\.0\.1/.test(wabaConfig.apiOrigin)) {
-        return `${wabaConfig.apiOrigin}/api/whatsapp/webhook`
-    }
+    const configured = wabaConfig.webhookUrl || (wabaConfig.apiOrigin && `${wabaConfig.apiOrigin}/api/whatsapp/webhook`)
+    try {
+        const url = new URL(configured)
+        if (url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash
+            && url.hostname.includes('.') && url.hostname !== '127.0.0.1' && !url.hostname.endsWith('.localhost')) {
+            return url.href
+        }
+    } catch { /* Report the same setup error for invalid and missing URLs. */ }
     throw new Error('Set WABA_WEBHOOK_URL to a public HTTPS URL, e.g. https://api.example.com/api/whatsapp/webhook')
 }

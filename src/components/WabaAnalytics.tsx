@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import axios from 'axios'
+import { useWabaApi } from './WabaHost'
 import { BarChart3, CalendarCheck, Download, MessageSquare, Users } from 'lucide-react'
 
 type Day = { day: string; inbound: number; outbound: number; delivered: number; read: number }
 type Report = { daily: Day[]; leads: number; bookings: number; handovers: number }
 
 export function WabaAnalytics({ accountId }: { accountId: string }) {
+    const api = useWabaApi()
     const [days, setDays] = useState(30)
     const [report, setReport] = useState<Report>()
     const [error, setError] = useState(false)
@@ -15,7 +16,7 @@ export function WabaAnalytics({ accountId }: { accountId: string }) {
         const controller = new AbortController()
         setReport(undefined)
         setError(false)
-        axios.get<Report>('/api/admin/waba/analytics', { params: { accountId, days }, signal: controller.signal })
+        api.get<Report>('/analytics', { params: { accountId, days }, signal: controller.signal })
             .then(({ data }) => setReport(data))
             .catch(() => { if (!controller.signal.aborted) setError(true) })
         return () => controller.abort()

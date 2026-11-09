@@ -1,3 +1,4 @@
+export { mountWaba } from './lib/mountWaba'
 export { setWabaAdapters } from './lib/adapters'
 export { wabaConfig, resolveWabaWebhookUrl } from './lib/config'
 export { WABA_FEATURE_PAUSED } from './lib/wabaFlags'

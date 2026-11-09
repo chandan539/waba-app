@@ -1,7 +1,7 @@
 import { inboxContacts, inboxMedia } from './wabaInboxContent'
 import { enqueueAssistantJob } from './assistantStore'
 import { getWabaPrisma, hostAudiencePhones } from './adapters'
-import { resolveWabaWebhookUrl } from './config'
+import { resolveWabaWebhookUrl, wabaConfig } from './config'
 import {
     EVENT_WABA_TEMPLATES,
     WABA_TEMPLATE_CATEGORIES,
@@ -125,7 +125,15 @@ export async function wabaPublicStatus(accountId?: string | null) {
             health.healthError = String(blocked[0]?.error_description || blocked[0]?.possible_solution || '')
         }
     }
+    let webhookUrl = ''
+    let webhookSetupError = ''
+    try { webhookUrl = wabaWebhookUrl() } catch (error) {
+        webhookSetupError = error instanceof Error ? error.message : 'Configure the public webhook URL.'
+    }
     return {
+        oauthPath: wabaConfig.oauthPath,
+        oauthOrigins: [wabaConfig.adminOrigin, ...wabaConfig.extraOauthOrigins],
+        webhookSetupError,
         ...publicWabaStatus({
             ...selected,
             metaAppId: selected?.metaAppId || settings?.metaAppId,
@@ -133,7 +141,7 @@ export async function wabaPublicStatus(accountId?: string | null) {
             embeddedSignupConfigId: selected?.embeddedSignupConfigId || settings?.embeddedSignupConfigId,
             verifyToken: selected?.verifyToken || settings?.verifyToken,
             ...phoneMeta,
-        }, wabaWebhookUrl()),
+        }, webhookUrl),
         ...health,
         accounts: accounts
             .map((item: any) => publicWabaAccount(item))
@@ -145,6 +153,7 @@ async function graphFetch(path: string, token: string, init?: RequestInit & { qu
     const url = graphUrl(path, init?.query)
     const response = await fetch(url, {
         ...init,
+        signal: init?.signal || AbortSignal.timeout(15000),
         headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -255,9 +264,10 @@ export async function exchangeEmbeddedSignup(input: {
     if (!appId || !secret) throw new Error('Save Meta App ID and App Secret first')
     if (!input.code) throw new Error('Missing Embedded Signup code')
 
-    const redirectUri = isAllowedWabaOauthRedirectUri(String(input.redirectUri || ''))
-        ? String(input.redirectUri).trim()
-        : wabaOauthRedirectUri()
+    const redirectUri = String(input.redirectUri || wabaOauthRedirectUri()).trim()
+    if (!isAllowedWabaOauthRedirectUri(redirectUri)) {
+        throw new Error('Meta redirect URL does not match WABA_ADMIN_ORIGIN and WABA_OAUTH_PATH for this installation.')
+    }
 
     const tokenRes = await fetch(graphUrl('/oauth/access_token', {
         client_id: appId,

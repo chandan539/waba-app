@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import axios from 'axios'
+import { useWabaApi } from './WabaHost'
 import {
     Bot,
     CalendarDays,
@@ -55,6 +55,7 @@ function Toggle({
     )
 }
 export function WabaAssistant({ accountId }: { accountId: string }) {
+    const api = useWabaApi()
     const [data, setData] = useState<any>(null)
     const [settings, setSettings] = useState<AssistantSettings>(assistantDefaults)
     const [section, setSection] = useState('setup')
@@ -66,7 +67,7 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
     const [handoverPhone, setHandoverPhone] = useState('')
     const params = { accountId }
     const load = async (resetSettings = false) => {
-        const result = await axios.get('/api/admin/waba/assistant', { params })
+        const result = await api.get('/assistant', { params })
         setData(result.data)
         if (resetSettings) setSettings(result.data.settings)
     }
@@ -75,8 +76,8 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
         setLoading(true)
         setData(null)
         setError('')
-        axios
-            .get('/api/admin/waba/assistant', { params })
+        api
+            .get('/assistant', { params })
             .then((result) => {
                 if (active) {
                     setData(result.data)
@@ -318,7 +319,7 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
                         disabled={busy || !data}
                         onClick={() =>
                             run(async () => {
-                                const result = await axios.put('/api/admin/waba/assistant/settings', {
+                                const result = await api.put('/assistant/settings', {
                                     accountId,
                                     settings,
                                 })
@@ -438,7 +439,7 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
                                 disabled={busy}
                                 onClick={() =>
                                     run(async () => {
-                                        await axios.put('/api/admin/waba/assistant/settings', {
+                                        await api.put('/assistant/settings', {
                                             accountId,
                                             settings,
                                         })
@@ -493,7 +494,7 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
                                 disabled={busy || !slot.startsAt || !slot.endsAt}
                                 onClick={() =>
                                     run(async () => {
-                                        await axios.post('/api/admin/waba/assistant/slots', {
+                                        await api.post('/assistant/slots', {
                                             accountId,
                                             serviceId: slot.serviceId,
                                             startsAt: new Date(slot.startsAt).toISOString(),
@@ -526,7 +527,7 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
                                         disabled={busy || Boolean(item.bookingId)}
                                         onClick={() =>
                                             run(async () => {
-                                                await axios.delete(`/api/admin/waba/assistant/slots/${item.id}`, {
+                                                await api.delete(`/assistant/slots/${item.id}`, {
                                                     params,
                                                 })
                                             })
@@ -624,7 +625,7 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
                         disabled={busy || !handoverPhone.trim()}
                         onClick={() =>
                             run(async () => {
-                                await axios.post('/api/admin/waba/assistant/handover', {
+                                await api.post('/assistant/handover', {
                                     accountId,
                                     phone: handoverPhone,
                                     handover: true,
@@ -648,7 +649,7 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
                                 disabled={busy}
                                 onClick={() =>
                                     run(async () => {
-                                        await axios.post('/api/admin/waba/assistant/handover', {
+                                        await api.post('/assistant/handover', {
                                             accountId,
                                             phone: item.phone,
                                             handover: false,
@@ -707,8 +708,8 @@ export function WabaAssistant({ accountId }: { accountId: string }) {
                                         disabled={busy}
                                         onClick={() =>
                                             run(async () => {
-                                                await axios.post(
-                                                    `/api/admin/waba/assistant/jobs/${job.id}/retry`,
+                                                await api.post(
+                                                    `/assistant/jobs/${job.id}/retry`,
                                                     { accountId },
                                                 )
                                             })

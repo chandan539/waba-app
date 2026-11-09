@@ -9,9 +9,8 @@ import { processAssistantJobs } from './assistantWorker'
 import { confirmBooking, holdBooking, expireBookingHolds, preparePayment } from './assistantBookings'
 import { disconnectWaba, recordWabaMessage, saveConnectedWaba } from './wabaService'
 import analyticsRouter from '../routes/wabaAnalytics'
+import { mountWaba } from './mountWaba'
 import adminRouter from '../routes/wabaAssistant'
-import wabaRouter from '../routes/waba'
-import webhookRouter from '../routes/wabaPublic'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 let prisma: any, app: any
@@ -77,17 +76,15 @@ describe.skipIf(!databaseUrl)('assistant with real Postgres and mocked external 
         const { PrismaClient } = await import('@prisma/client')
         prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } })
         app = express()
-        app.use(
-            express.json({
-                verify: (req, _res, bytes) => {
-                    ;(req as any).rawBody = bytes
-                },
-            }),
-        )
-        app.use('/webhook', webhookRouter)
-        app.use('/assistant', adminRouter)
+        mountWaba(app, {
+            prisma,
+            requireAdmin: (_req, _res, next) => next(),
+            adminPath: '/waba',
+            webhookPath: '/webhook',
+            workers: false,
+        })
+        app.use('/assistant', express.json(), adminRouter)
         app.use('/analytics', analyticsRouter)
-        app.use('/waba', wabaRouter)
     })
     beforeEach(async () => {
         for (const model of [

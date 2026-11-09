@@ -77,6 +77,8 @@ describe('WABA helpers', () => {
         expect(isFacebookMessageOrigin('https://www.facebook.com')).toBe(true)
         expect(isFacebookMessageOrigin('https://web.facebook.com')).toBe(true)
         expect(isFacebookMessageOrigin('https://evil.example')).toBe(false)
+        expect(isFacebookMessageOrigin('https://evilfacebook.com')).toBe(false)
+        expect(isFacebookMessageOrigin('http://www.facebook.com')).toBe(false)
         const finished = parseEmbeddedSignupMessage({
             type: 'WA_EMBEDDED_SIGNUP',
             event: 'FINISH',
@@ -101,10 +103,14 @@ describe('WABA helpers', () => {
             appId: '133',
             configId: '1085',
             redirectUri,
+            state: 'test-oauth-state',
         })
         expect(redirectUri).toBe('https://admin.example.com/admin/waba')
         expect(isAllowedWabaOauthRedirectUri('http://localhost:3000/admin/waba')).toBe(true)
         expect(isAllowedWabaOauthRedirectUri('https://evil.example/admin/waba')).toBe(false)
+        expect(isAllowedWabaOauthRedirectUri('http://user@localhost:3000/admin/waba')).toBe(false)
+        expect(isAllowedWabaOauthRedirectUri('http://localhost:3000/other')).toBe(false)
+        expect(new URL(dialog).searchParams.get('state')).toBe('test-oauth-state')
         expect(dialog).toContain('config_id=1085')
         expect(dialog).toContain('response_type=code')
         expect(dialog).toContain(`redirect_uri=${encodeURIComponent(redirectUri)}`)

@@ -19,25 +19,47 @@ Copy this folder into another Node/Express + React admin app. It is not a full s
 | Database | `prisma/schema.prisma`, `prisma/waba.sql` |
 | Paste-into-Cursor prompt | [`PROMPT.md`](./PROMPT.md) |
 
-## Add it to another app
+## Add Wabix to another app
 
-```bash
-git clone https://github.com/chandan539/waba-app.git
+Keep Wabix pinned as a Git dependency or submodule so each host starts with the same module. The source package requires a TypeScript-aware server build and React bundler. A host can also vendor the complete `src/` and `prisma/` directories.
+
+1. Merge the Wabix Prisma models, regenerate the Prisma client, and apply `prisma/waba.sql` followed by `prisma/assistant.sql`.
+2. Use `.env.example` as the starting point. Set the public HTTPS `WABA_WEBHOOK_URL`, `WABA_ADMIN_ORIGIN`, and `WABA_OAUTH_PATH` for this installation.
+3. Mount the Express module before the host's general JSON parser. Pass the host's admin authentication and database client.
+
+```ts
+import { mountWaba } from 'waba-app'
+
+const stopWabaWorkers = mountWaba(app, {
+    prisma,
+    requireAdmin,
+    adminPath: '/api/tools/wabix',
+    webhookPath: '/api/hooks/wabix',
+})
 ```
 
-1. Copy `src/` and `prisma/` into the host repo (or add this repo as a git submodule).
-2. Merge the Prisma models and run `prisma/waba.sql` followed by `prisma/assistant.sql` (additive, no drops).
-3. Copy `.env.example` keys into the host `.env`. Set a **public HTTPS** `WABA_WEBHOOK_URL`.
-4. At API boot, follow `src/examples/express-mount.ts`:
-   - `setWabaAdapters({ prisma, requireAdmin, getAudiencePhones })`
-   - save `rawBody` on `/api/whatsapp/webhook`
-   - mount `/api/admin/waba` and `/api/whatsapp/webhook`
-   - run `processAssistantJobs()` every 2–5 seconds in an always-on worker
-   - cron `processWhatsAppQueue()` every minute
-5. Add an admin page that renders `WabaBoard` (`src/examples/nextjs-admin-page.tsx`).
-6. From order/lead/warranty handlers call `triggerWhatsAppFlow(triggerType, { phone, name, orderId, total })`.
+The example webhook requires a `WABA_WEBHOOK_URL` ending in `/api/hooks/wabix` or a public proxy that forwards to that path. The defaults are `/api/admin/waba` and `/api/whatsapp/webhook`. Mount one installation per API process. If another always-on process owns the queue and assistant workers, set `workers: false`. Call the returned function during server shutdown.
 
-Meta App ID, App Secret, verify token, and access token are entered in the **Connect Meta** tab. They live in `WhatsAppAccount`. Do not put them in git.
+4. Render the module on a protected admin page. Use the same API path as the Express mount. Supply your Axios instance when requests need host-specific authentication headers. Include the Wabix source in the host's Tailwind source scan.
+
+```tsx
+'use client'
+
+import { WabaModule } from 'waba-app/components/WabaModule'
+
+export default function WhatsAppAdmin() {
+    return <WabaModule apiBase="/api/tools/wabix" />
+}
+```
+
+`WabaModule` opens the new **Channels** workspace with number switching and downloadable WhatsApp QR codes. Existing pages can continue to render `WabaBoard` or use `WabaBoard channels` to add the Channels tab. `WabaHost` also configures the API for separately mounted Wabix components.
+
+5. Register the exact admin callback URL (`WABA_ADMIN_ORIGIN` + `WABA_OAUTH_PATH`) in Meta, and ensure it renders the Wabix board. In Wabix **Settings**, save the installation's Meta App ID, App Secret, and Embedded Signup configuration ID. Then click **Connect with Meta** and complete Meta's authorization. Confirm webhook delivery with a test message. Meta credentials live in the host database.
+6. Wire optional host events, campaign audience lookup, and provider adapters. Order, lead, and warranty handlers can call `triggerWhatsAppFlow(triggerType, { phone, name, orderId, total })`.
+
+### When Meta stops customer onboarding
+
+If the Meta window says your business cannot onboard customers, save the session ID shown in Meta. Check the App ID and Embedded Signup configuration in Wabix against the owning Meta app. In Meta for Developers, check the app's status, business verification, App Review and Advanced Access for its WhatsApp permissions, and Tech Provider access for onboarding other businesses. If those checks pass and the error persists, give the session ID to Meta support. An already provisioned Cloud API number can use **Connect with token** in Wabix Settings with authorized credentials. See [Meta's Embedded Signup documentation](https://www.postman.com/meta/whatsapp-business-platform/documentation/du6gzjv/embedded-signup).
 
 ## Live demo
 

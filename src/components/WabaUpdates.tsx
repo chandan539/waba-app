@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useWabaApi } from './WabaHost'
 import axios from 'axios'
 import { Download, RefreshCw } from 'lucide-react'
 import version from '../lib/wabaVersion.json'
@@ -12,9 +13,10 @@ type UpdateStatus = {
     available: { version: string; commit: string; releaseUrl: string } | null
     checkError?: string
 }
-const path = '/api/admin/waba/updates'
+const path = '/updates'
 
 export function WabaUpdates() {
+    const api = useWabaApi()
     const [status, setStatus] = useState<UpdateStatus>()
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState('')
@@ -25,7 +27,7 @@ export function WabaUpdates() {
         setChecking(true)
         setError('')
         try {
-            const { data } = await axios.get<UpdateStatus>(path)
+            const { data } = await api.get<UpdateStatus>(path)
             setStatus(data)
             setRequested(current => data.installedVersion === current ? '' : current)
         } catch {
@@ -42,7 +44,7 @@ export function WabaUpdates() {
         setBusy(true)
         setError('')
         try {
-            const { data } = await axios.post<{ requestedVersion: string }>(path, { commit: status.available.commit })
+            const { data } = await api.post<{ requestedVersion: string }>(path, { commit: status.available.commit })
             setRequested(data.requestedVersion)
         } catch (err) {
             setError(axios.isAxiosError(err) ? err.response?.data?.error || 'Could not confirm the update request.' : 'Could not confirm the update request.')

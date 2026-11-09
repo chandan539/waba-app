@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import axios from 'axios'
+import { useWabaApi } from './WabaHost'
 import { ArrowDown, Clock3, Loader2, MessageSquare, Plus, Trash2, Zap } from 'lucide-react'
 import { cn } from '../lib/cn'
 import { WABA_FLOW_TRIGGERS } from '../lib/wabaTriggers'
@@ -25,6 +25,7 @@ export function WabaFlows({
     templates: Array<{ id: string; name: string; status: string }>
     accountId?: string
 }) {
+    const api = useWabaApi()
     const [flows, setFlows] = useState<Flow[]>([])
     const [activeId, setActiveId] = useState('')
     const [loading, setLoading] = useState(true)
@@ -41,7 +42,7 @@ export function WabaFlows({
     const triggerLabel = (id: string) => WABA_FLOW_TRIGGERS.find((item) => item.id === id)?.label || id
 
     const load = async () => {
-        const res = await axios.get('/api/admin/waba/flows', { params: { accountId } })
+        const res = await api.get('/flows', { params: { accountId } })
         setFlows(res.data.flows || [])
         return res.data.flows || []
     }
@@ -85,7 +86,7 @@ export function WabaFlows({
                     Active
                 </label>
                 <button type="button" className={btnClass} disabled={saving || !form.name.trim()} onClick={() => run(async () => {
-                    const created = await axios.post('/api/admin/waba/flows', { ...form, accountId })
+                    const created = await api.post('/flows', { ...form, accountId })
                     setActiveId(created.data.flow.id)
                     setForm({ name: '', triggerType: 'ORDER_PLACED', isActive: false })
                 })}>
@@ -118,11 +119,11 @@ export function WabaFlows({
                             </div>
                             <div className="flex flex-wrap gap-2">
                                 <button type="button" className={ghostClass} disabled={saving || !edit.name.trim()} onClick={() => run(async () => {
-                                    await axios.put(`/api/admin/waba/flows/${active.id}`, edit)
+                                    await api.put(`/flows/${active.id}`, edit)
                                 })}>Save</button>
                                 <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => {
                                     if (!confirm('Delete this WhatsApp flow?')) return
-                                    await axios.delete(`/api/admin/waba/flows/${active.id}`)
+                                    await api.delete(`/flows/${active.id}`)
                                 })}><Trash2 className="h-4 w-4" /></button>
                             </div>
                         </div>
@@ -141,7 +142,7 @@ export function WabaFlows({
                                     <MessageSquare size={17} className="shrink-0 text-indigo-600" />
                                     <div className="min-w-0 flex-1"><p className="flex items-center gap-1 text-xs text-slate-500"><Clock3 size={12} />{step.delayHours ? `After ${step.delayHours} hours` : 'Immediately'}</p><p className="break-words font-semibold">{step.templateName}</p></div>
                                     <button type="button" aria-label={`Delete step ${step.sequenceOrder}`} className={ghostClass} disabled={saving} onClick={() => run(async () => {
-                                        if (confirm('Delete this step?')) await axios.delete(`/api/admin/waba/flow-steps/${step.id}`)
+                                        if (confirm('Delete this step?')) await api.delete(`/flow-steps/${step.id}`)
                                     })}><Trash2 size={16} /></button>
                                 </div>
                             </div>)}
@@ -155,7 +156,7 @@ export function WabaFlows({
                                 {approved.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
                             </select>
                             <button type="button" className={btnClass} disabled={saving || !stepForm.templateName} onClick={() => run(async () => {
-                                await axios.post(`/api/admin/waba/flows/${active.id}/steps`, stepForm)
+                                await api.post(`/flows/${active.id}/steps`, stepForm)
                                 setStepForm({ sequenceOrder: active.steps.length + 2, delayHours: 0, templateName: '' })
                             })}>Add step</button>
                         </div>

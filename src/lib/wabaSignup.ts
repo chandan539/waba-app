@@ -13,6 +13,7 @@ export function wabaOauthRedirectUri(origin?: string) {
 export function isAllowedWabaOauthRedirectUri(uri: string) {
     try {
         const url = new URL(String(uri || '').trim())
+        if (url.username || url.password || !['https:', 'http:'].includes(url.protocol)) return false
         if (url.pathname !== WABA_OAUTH_REDIRECT_PATH) return false
         if (url.search || url.hash) return false
         const origin = `${url.protocol}//${url.host}`.replace(/\/$/, '')
@@ -20,10 +21,9 @@ export function isAllowedWabaOauthRedirectUri(uri: string) {
             WABA_OAUTH_DEFAULT_ORIGIN.replace(/\/$/, ''),
             ...wabaConfig.extraOauthOrigins,
         ])
-        if (allowed.has(origin)) return true
         const host = url.hostname.toLowerCase()
         if ((host === 'localhost' || host === '127.0.0.1') && (url.protocol === 'http:' || url.protocol === 'https:')) return true
-        return false
+        return url.protocol === 'https:' && allowed.has(origin)
     } catch {
         return false
     }
@@ -38,7 +38,13 @@ export const WABA_FINISH_EVENTS = [
 ] as const
 
 export function isFacebookMessageOrigin(origin: string) {
-    return typeof origin === 'string' && origin.endsWith('facebook.com')
+    try {
+        const url = new URL(origin)
+        return url.origin === origin && url.protocol === 'https:'
+            && (url.hostname === 'facebook.com' || url.hostname.endsWith('.facebook.com'))
+    } catch {
+        return false
+    }
 }
 
 export function parseEmbeddedSignupMessage(raw: unknown) {
@@ -73,6 +79,7 @@ export function embeddedSignupDialogUrl(input: {
     configId: string
     redirectUri: string
     version?: string
+    state?: string
 }) {
     const params = new URLSearchParams({
         client_id: String(input.appId || '').trim(),
@@ -83,6 +90,7 @@ export function embeddedSignupDialogUrl(input: {
         display: 'popup',
         extras: JSON.stringify({ setup: {} }),
     })
+    if (input.state) params.set('state', input.state)
     const version = input.version || 'v21.0'
     return `https://www.facebook.com/${version}/dialog/oauth?${params.toString()}`
 }

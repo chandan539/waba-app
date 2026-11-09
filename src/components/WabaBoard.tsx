@@ -1,19 +1,20 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import axios from 'axios'
-import { BarChart3, Smartphone, Bot, Loader2, MessageSquare, Workflow, FileText, Megaphone, Plug, ChevronRight } from 'lucide-react'
+import { useWabaApi } from './WabaHost'
+import { BarChart3, Smartphone, Bot, Loader2, MessageSquare, Workflow, FileText, Megaphone, Plug, ChevronRight, Layers } from 'lucide-react'
 import { cn } from '../lib/cn'
-import { WABA_GRAPH_VERSION, embeddedSignupDialogUrl, isFacebookMessageOrigin, parseEmbeddedSignupMessage, wabaOauthRedirectUri } from '../lib/wabaSignup'
+import { WABA_GRAPH_VERSION, WABA_OAUTH_REDIRECT_PATH, embeddedSignupDialogUrl, isFacebookMessageOrigin, parseEmbeddedSignupMessage } from '../lib/wabaSignup'
 import { WABA_FEATURE_PAUSED } from '../lib/wabaFlags'
 import { WabaInbox } from './WabaInbox'
 import { WabaFlows } from './WabaFlows'
 import { WabaAssistant } from './WabaAssistant'
 import { WabaUpdates } from './WabaUpdates'
 
+import { WabaChannels } from './WabaChannels'
 import { WabaAnalytics } from './WabaAnalytics'
 
-type Tab = 'analytics' | 'numbers' | 'assistant' | 'inbox' | 'flows' | 'connect' | 'templates' | 'campaigns'
+type Tab = 'channels' | 'analytics' | 'numbers' | 'assistant' | 'inbox' | 'flows' | 'connect' | 'templates' | 'campaigns'
 type Account = {
     id: string
     isSelected: boolean
@@ -55,6 +56,9 @@ type Status = {
     verifyTokenSet: boolean
     verifyToken: string
     webhookUrl: string
+    webhookSetupError: string
+    oauthPath: string
+    oauthOrigins: string[]
     lastWebhookAt: string | null
     lastWebhookFields: string
     graphVersion: string
@@ -89,6 +93,9 @@ const emptyStatus: Status = {
     verifyTokenSet: false,
     verifyToken: '',
     webhookUrl: '',
+    webhookSetupError: '',
+    oauthPath: '',
+    oauthOrigins: [],
     lastWebhookAt: null,
     lastWebhookFields: '',
     graphVersion: WABA_GRAPH_VERSION,
@@ -106,7 +113,10 @@ const TABS: { id: Tab; label: string }[] = [
     { id: 'connect', label: 'Settings' },
 ]
 
-const tabIcons = { analytics: BarChart3, numbers: Smartphone, assistant: Bot, inbox: MessageSquare, flows: Workflow, templates: FileText, campaigns: Megaphone, connect: Plug }
+const channelsTab = { id: 'channels', label: 'Channels' } as const
+const tabIcons = { channels: Layers, analytics: BarChart3, numbers: Smartphone, assistant: Bot, inbox: MessageSquare, flows: Workflow, templates: FileText, campaigns: Megaphone, connect: Plug }
+
+const emptySignupSession = { wabaId: '', phoneNumberId: '', businessId: '', event: '', cancelled: false, currentStep: '', errorMessage: '', errorCode: '', sessionId: '' }
 
 const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-normal text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20'
 const btnClass = 'inline-flex h-11 items-center justify-center rounded-lg bg-[#00685d] px-4 text-sm font-semibold text-white disabled:opacity-50'
@@ -121,8 +131,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     )
 }
 
-export function WabaBoard() {
-    const [tab, setTab] = useState<Tab>('inbox')
+export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
+    const api = useWabaApi()
+    const [tab, setTab] = useState<Tab>(channels ? 'channels' : 'inbox')
     const [status, setStatus] = useState<Status>(emptyStatus)
     const [numberPage, setNumberPage] = useState(0)
     const [accounts, setAccounts] = useState<Account[]>([])
@@ -136,10 +147,20 @@ export function WabaBoard() {
     const [templateForm, setTemplateForm] = useState({ name: 'order_placed', language: 'en', category: 'UTILITY', body: 'Hello {{name}}, your order {{orderId}} is confirmed. Total {{total}}.' })
     const [campaignForm, setCampaignForm] = useState({ name: '', templateId: '', audience: 'ORDERS' })
     const [testPhone, setTestPhone] = useState('')
-    const signupSession = useRef({ wabaId: '', phoneNumberId: '', businessId: '', event: '', cancelled: false, currentStep: '', errorMessage: '' })
+    const popupRef = useRef<Window | null>(null)
+    const popupCleanup = useRef<() => void>(() => {})
+    const [loadError, setLoadError] = useState('')
+    const [signupError, setSignupError] = useState('')
+    const redirectUri = typeof window === 'undefined' ? '' : window.location.origin + (status.oauthPath || WABA_OAUTH_REDIRECT_PATH)
+    const signupSession = useRef(emptySignupSession)
+    const reportSignupError = (message: string) => {
+        const { errorCode, sessionId } = signupSession.current
+        setSignupError([message, errorCode && `Meta code ${errorCode}.`, sessionId && `Session ID ${sessionId}.`].filter(Boolean).join(' '))
+    }
 
     const load = async () => {
-        const res = await axios.get('/api/admin/waba')
+        const res = await api.get('')
+        setLoadError('')
         setStatus({ ...emptyStatus, ...(res.data.status || {}) })
         setAccounts(res.data.status?.accounts || [])
         setTemplates(res.data.templates || [])
@@ -159,19 +180,19 @@ export function WabaBoard() {
         }
         if (typeof window !== 'undefined') {
             const params = new URLSearchParams(window.location.search)
-            const oauthReturn = Boolean(params.get('code') || params.get('error') || params.get('error_description'))
+            const oauthReturn = Boolean(params.get('state') && (params.get('code') || params.get('error') || params.get('error_description')))
             const isPopup = Boolean(window.opener && window.opener !== window)
             if (oauthReturn && isPopup) {
                 setLoading(false)
                 return
             }
         }
-        load().catch((error) => alert(error.response?.data?.error || 'Could not load WABA')).finally(() => setLoading(false))
+        load().catch((error) => setLoadError(error.response?.data?.error || 'Could not load WABA. Check the host API connection.')).finally(() => setLoading(false))
     }, [])
 
     useEffect(() => {
         const onMessage = (event: MessageEvent) => {
-            if (!isFacebookMessageOrigin(event.origin)) return
+            if (!isFacebookMessageOrigin(event.origin) || event.source !== popupRef.current) return
             const parsed = parseEmbeddedSignupMessage(event.data)
             if (!parsed) return
             signupSession.current = {
@@ -182,7 +203,10 @@ export function WabaBoard() {
                 cancelled: parsed.cancelled,
                 currentStep: parsed.currentStep,
                 errorMessage: parsed.errorMessage,
+                errorCode: parsed.errorCode,
+                sessionId: parsed.sessionId,
             }
+            if (parsed.errorMessage) reportSignupError(parsed.errorMessage)
             if (parsed.finished && typeof window !== 'undefined') {
                 sessionStorage.setItem('waba_es_session', JSON.stringify({
                     wabaId: parsed.wabaId,
@@ -192,10 +216,10 @@ export function WabaBoard() {
             }
         }
         window.addEventListener('message', onMessage)
-        return () => window.removeEventListener('message', onMessage)
+        return () => { window.removeEventListener('message', onMessage); popupCleanup.current() }
     }, [])
 
-    const exchangeCode = async (code: string) => {
+    const exchangeCode = async (code: string, callback: string) => {
         const started = Date.now()
         while (Date.now() - started < 2500) {
             if (signupSession.current.wabaId || signupSession.current.cancelled) break
@@ -215,15 +239,14 @@ export function WabaBoard() {
                 // Ignore malformed session leftovers.
             }
         }
-        const pin = manual.pin || (typeof window !== 'undefined' ? sessionStorage.getItem('waba_pin') || '' : '')
-        const redirectUri = wabaOauthRedirectUri(typeof window !== 'undefined' ? window.location.origin : undefined)
-        await axios.post('/api/admin/waba/embedded-signup', {
+        const pin = sessionStorage.getItem('waba_pin') || manual.pin
+        await api.post('/embedded-signup', {
             code,
             wabaId: session.wabaId,
             phoneNumberId: session.phoneNumberId,
             businessId: session.businessId,
             pin,
-            redirectUri,
+            redirectUri: callback,
         })
         if (typeof window !== 'undefined') {
             sessionStorage.removeItem('waba_pin')
@@ -236,18 +259,21 @@ export function WabaBoard() {
         const params = new URLSearchParams(window.location.search)
         const code = params.get('code')
         const error = params.get('error_description') || params.get('error')
-        if (!code && !error) return
-        window.history.replaceState({}, '', '/admin/waba')
-        if (error) {
-            alert(error)
-            return
-        }
+        const state = params.get('state')
+        if (!state || (!code && !error)) return
         if (window.opener && window.opener !== window) {
-            window.opener.postMessage({ type: 'WABA_OAUTH_CODE', code }, window.location.origin)
-            window.close()
+            window.opener.postMessage({ type: 'WABA_OAUTH_RESULT', code, state, error }, window.location.origin)
             return
         }
-        run(async () => { await exchangeCode(code!) })
+        if (state !== sessionStorage.getItem('waba_oauth_state')) return
+        const callback = sessionStorage.getItem('waba_oauth_redirect') || ''
+        sessionStorage.removeItem('waba_oauth_state')
+        sessionStorage.removeItem('waba_oauth_redirect')
+        const cleanUrl = new URL(window.location.href)
+        for (const name of ['code', 'state', 'error', 'error_description', 'error_reason', 'error_code']) cleanUrl.searchParams.delete(name)
+        window.history.replaceState(window.history.state, '', cleanUrl)
+        if (error) { reportSignupError(error); return }
+        void completeSignup(code!, callback)
     }, [])
 
     const run = async (work: () => Promise<void>) => {
@@ -262,71 +288,87 @@ export function WabaBoard() {
         }
     }
 
-    const connectWithMeta = async () => {
-        let configId = String(status.embeddedSignupConfigId || settings.embeddedSignupConfigId || '').trim()
-        let appId = String(status.metaAppId || settings.metaAppId || '').trim()
-        if (!appId || !configId) {
-            try {
-                const res = await axios.get('/api/admin/waba')
-                const next = res.data.status || {}
-                setStatus({ ...emptyStatus, ...next })
-                setAccounts(next.accounts || [])
-                setSettings((prev) => ({
-                    ...prev,
-                    metaAppId: next.metaAppId || prev.metaAppId,
-                    embeddedSignupConfigId: next.embeddedSignupConfigId || prev.embeddedSignupConfigId,
-                }))
-                appId = String(next.metaAppId || settings.metaAppId || '').trim()
-                configId = String(next.embeddedSignupConfigId || settings.embeddedSignupConfigId || '').trim()
-            } catch {
-                // Keep local values if the refresh fails.
-            }
-        }
-        if (!appId || !configId) {
+    const completeSignup = (code: string, callback: string) => run(async () => {
+        try { await exchangeCode(code, callback); setSignupError('') }
+        catch (error: any) { reportSignupError(error.response?.data?.error || error.message || 'Could not complete Meta signup.') }
+    })
+
+    const connectWithMeta = () => {
+        if (popupRef.current && !popupRef.current.closed) { popupRef.current.focus(); return }
+        setSignupError('')
+        signupSession.current = emptySignupSession
+        const appId = status.metaAppId
+        const configId = status.embeddedSignupConfigId
+        if (!appId || !configId || !status.hasAppSecret) {
             setTab('connect')
-            alert('Save Meta App ID and a v4 Embedded Signup configuration ID first')
+            reportSignupError('Save your Meta App ID, App Secret, and Embedded Signup configuration ID first.')
             return
         }
-        signupSession.current = { wabaId: '', phoneNumberId: '', businessId: '', event: '', cancelled: false, currentStep: '', errorMessage: '' }
-        const redirectUri = wabaOauthRedirectUri(window.location.origin)
-        const url = embeddedSignupDialogUrl({ appId, configId, redirectUri })
-        if (!url.includes(`config_id=${configId}`) || !url.includes('response_type=code')) {
-            alert('Could not build the Embedded Signup URL. Recheck the configuration ID.')
+        const callback = new URL(redirectUri)
+        const local = ['localhost', '127.0.0.1'].includes(callback.hostname)
+        if (!local && callback.protocol !== 'https:') {
+            reportSignupError('Meta connection requires an HTTPS admin page.')
             return
         }
+        if (!local && status.oauthOrigins.length && !status.oauthOrigins.includes(callback.origin)) {
+            reportSignupError('This host is missing from WABA_ADMIN_ORIGIN or WABA_OAUTH_ORIGINS. Add it on the server and allow the callback URL in Meta.')
+            return
+        }
+        if (status.webhookSetupError) { reportSignupError(status.webhookSetupError); return }
+        popupCleanup.current()
+        sessionStorage.removeItem('waba_es_session')
+        const state = window.crypto.randomUUID()
+        const url = embeddedSignupDialogUrl({ appId, configId, redirectUri, state })
+        sessionStorage.setItem('waba_oauth_state', state)
+        sessionStorage.setItem('waba_oauth_redirect', redirectUri)
         sessionStorage.setItem('waba_pin', manual.pin || '')
         const popup = window.open(url, 'fb_waba_es', 'width=620,height=780,scrollbars=yes')
         if (!popup) {
-            window.location.href = url
+            window.location.assign(url)
             return
+        }
+        popupRef.current = popup
+        let finished = false
+        const cleanup = () => {
+            window.clearInterval(timer)
+            window.removeEventListener('message', onResult)
+            popupCleanup.current = () => {}
+            popupRef.current = null
+            try { popup.close() } catch {}
+        }
+        const finish = (code: string | null, resultState: string | null, error: string | null) => {
+            if (finished || resultState !== state) return
+            finished = true
+            cleanup()
+            sessionStorage.removeItem('waba_oauth_state')
+            sessionStorage.removeItem('waba_oauth_redirect')
+            if (code) void completeSignup(code, redirectUri)
+            else reportSignupError(error || signupSession.current.errorMessage || 'Meta did not return an authorization code.')
+        }
+        const onResult = (event: MessageEvent) => {
+            if (event.origin !== window.location.origin || event.source !== popup || event.data?.type !== 'WABA_OAUTH_RESULT') return
+            finish(event.data.code, event.data.state, event.data.error)
         }
         const timer = window.setInterval(() => {
             if (popup.closed) {
-                window.clearInterval(timer)
+                if (!signupSession.current.errorMessage) {
+                    reportSignupError('Meta signup closed before returning an authorization code. If Meta showed an error, save its session ID and check the app in Meta for Developers.')
+                }
+                cleanup()
+                sessionStorage.removeItem('waba_oauth_state')
+                sessionStorage.removeItem('waba_oauth_redirect')
                 return
             }
             try {
-                const popupUrl = new URL(popup.location.href)
-                if (popupUrl.origin !== window.location.origin) return
-                const code = popupUrl.searchParams.get('code')
-                const error = popupUrl.searchParams.get('error_description') || popupUrl.searchParams.get('error')
-                popup.close()
-                window.clearInterval(timer)
-                if (code) run(async () => { await exchangeCode(code) })
-                else alert(error || 'Meta did not return an authorization code. The Facebook URL must include config_id and response_type=code. Recreate the configuration as WhatsApp Embedded Signup, or use Connect with token.')
-            } catch {
-                // Still on facebook.com until redirect.
-            }
+                const result = new URL(popup.location.href)
+                if (result.origin !== callback.origin || result.pathname !== callback.pathname) return
+                const code = result.searchParams.get('code')
+                const error = result.searchParams.get('error_description') || result.searchParams.get('error')
+                if (code || error) finish(code, result.searchParams.get('state'), error)
+            } catch { /* Meta owns the popup until it redirects. */ }
         }, 400)
-        const onOpenerMessage = (event: MessageEvent) => {
-            if (event.origin !== window.location.origin) return
-            if (event.data?.type !== 'WABA_OAUTH_CODE' || !event.data?.code) return
-            window.clearInterval(timer)
-            window.removeEventListener('message', onOpenerMessage)
-            try { popup.close() } catch {}
-            run(async () => { await exchangeCode(String(event.data.code)) })
-        }
-        window.addEventListener('message', onOpenerMessage)
+        popupCleanup.current = cleanup
+        window.addEventListener('message', onResult)
     }
 
     if (WABA_FEATURE_PAUSED) {
@@ -350,9 +392,14 @@ export function WabaBoard() {
         )
     }
 
+    if (loadError) return <div role="alert" className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-5 text-rose-900">
+        <p>{loadError}</p><button type="button" className={ghostClass} onClick={() => void load().catch(() => {})}>Retry connection</button>
+    </div>
+
     const pageCount = Math.max(1, Math.ceil(accounts.length / 20))
     const page = Math.min(numberPage, pageCount - 1)
     const first = page * 20
+    const tabs = channels ? [channelsTab, ...TABS] : TABS
     const approved = templates.filter((item) => String(item.status).toUpperCase() === 'APPROVED')
 
     return (
@@ -361,14 +408,20 @@ export function WabaBoard() {
                 <div className="flex items-center gap-3 py-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#00685d] text-white"><MessageSquare size={22} /></span><span className="text-xl font-semibold tracking-tight">Wabix AI</span></div>
                 <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">WhatsApp workspace</p><p className="mt-1 truncate text-sm font-semibold">{status.displayName || 'Your business'}</p><p className="mt-2 truncate text-xs text-[#00685d]">{status.displayPhone || 'Connect a number to begin'}</p></div>
                 <nav aria-label="WhatsApp navigation" className="flex flex-wrap gap-2 md:flex-col">
-                    {TABS.map((item) => { const Icon = tabIcons[item.id]; return <button key={item.id} type="button" aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)} className={cn('flex items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition-colors', tab === item.id ? 'bg-[#00685d] text-white shadow-sm' : 'text-slate-600 hover:bg-white')}><Icon size={18} />{item.label}</button> })}
+                    {tabs.map((item) => { const Icon = tabIcons[item.id]; return <button key={item.id} type="button" aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)} className={cn('flex items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition-colors', tab === item.id ? 'bg-[#00685d] text-white shadow-sm' : 'text-slate-600 hover:bg-white')}><Icon size={18} />{item.label}</button> })}
                 </nav>
                 <div className="mt-auto rounded-lg border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-500">WhatsApp Business Platform<p className="mt-1 font-medium text-[#00685d]">Customer conversations, connected.</p></div>
             </aside>
             <main className="min-w-0">
-                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{TABS.find(item => item.id === tab)?.label}</span></p><button type="button" onClick={() => setTab('numbers')} title="Switch WhatsApp number" className={cn('rounded-full px-3 py-1.5 text-xs font-medium', status.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>{status.connected ? '● Connected' : status.pendingPhone ? '● Phone pending' : '○ Not connected'}</button></header>
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{tabs.find(item => item.id === tab)?.label}</span></p><button type="button" onClick={() => setTab('numbers')} title="Switch WhatsApp number" className={cn('rounded-full px-3 py-1.5 text-xs font-medium', status.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>{status.connected ? '● Connected' : status.pendingPhone ? '● Phone pending' : '○ Not connected'}</button></header>
                 <div className="space-y-6 p-4 lg:p-7">
-                <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{TABS.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ analytics: 'Track messages, delivery, leads and bookings.', numbers: 'Switch between business numbers or add another connection.', assistant: 'Your business knowledge, conversations and bookings, connected.', inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Manage app updates and connect your WhatsApp Business numbers.' }[tab]}</p></div>
+                <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{tabs.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ channels: 'Connect, switch and share your WhatsApp Business channels.', analytics: 'Track messages, delivery, leads and bookings.', numbers: 'Switch between business numbers or add another connection.', assistant: 'Your business knowledge, conversations and bookings, connected.', inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Manage app updates and connect your WhatsApp Business numbers.' }[tab]}</p></div>
+
+            {signupError && (tab === 'channels' || tab === 'connect') && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">{signupError}</div>}
+
+            {tab === 'channels' && <WabaChannels accounts={accounts} busy={saving} onConnect={connectWithMeta}
+                onSettings={() => setTab('connect')}
+                onSelect={(id) => void run(async () => { await api.post('/accounts/select', { accountId: id }) })} />}
 
             {tab === 'numbers' && (
                 <section className="rounded-xl border border-slate-200 bg-white p-4">
@@ -379,7 +432,7 @@ export function WabaBoard() {
                     <div className="flex flex-col gap-2">
                         {accounts.slice(first, first + 20).map((item) => (
                             <div key={item.id} className={cn('flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3', item.isSelected ? 'bg-[#00685d] text-white' : 'bg-slate-50 text-slate-700')}>
-                                <button type="button" aria-pressed={item.isSelected} disabled={saving} className="min-w-0 flex-1 text-left" onClick={() => run(async () => { await axios.post('/api/admin/waba/accounts/select', { accountId: item.id }) })}>
+                                <button type="button" aria-pressed={item.isSelected} disabled={saving} className="min-w-0 flex-1 text-left" onClick={() => run(async () => { await api.post('/accounts/select', { accountId: item.id }) })}>
                                     <p className="truncate text-sm font-semibold">{item.label || item.displayPhone || item.wabaId || 'WhatsApp number'}</p>
                                     <p className={cn('text-xs font-semibold', item.isSelected ? 'text-white/70' : 'text-slate-500')}>
                                         {item.connected ? `${item.displayName || 'Connected'} · ${item.phoneNumberId}` : item.pendingPhone ? 'Phone pending' : 'Not connected — delete if this number was removed in Meta'}
@@ -391,7 +444,7 @@ export function WabaBoard() {
                                     disabled={saving}
                                     onClick={() => run(async () => {
                                         if (!confirm('Remove this WhatsApp number? Inbox, templates and flows for this number will be deleted here. This does not change Meta if you already deleted it there.')) return
-                                        await axios.delete(`/api/admin/waba/accounts/${item.id}`)
+                                        await api.delete(`/accounts/${item.id}`)
                                     })}
                                 >
                                     Delete
@@ -439,7 +492,7 @@ export function WabaBoard() {
                         <p className="text-sm text-slate-500">Create a new Facebook Login for Business configuration. Choosing products sets the flow to v4. Do not reuse a v2/v3 config. Graph {status.graphVersion}.</p>
                         <ol className="list-decimal space-y-1 pl-5 text-sm font-medium text-slate-500">
                             <li>App Dashboard → Facebook Login for Business → Settings: turn on Client OAuth, Web OAuth, Enforce HTTPS, Embedded Browser OAuth, Strict Mode, and Login with the JavaScript SDK.</li>
-                            <li>Add <span className="font-mono text-slate-800">{typeof window !== 'undefined' ? `${window.location.origin}/admin/waba` : 'https://admin.example.com/admin/waba'}</span> to Valid OAuth Redirect URIs, and this admin host to Allowed domains.</li>
+                            <li>Add <span className="font-mono text-slate-800">{redirectUri || 'Your configured admin callback URL'}</span> to Valid OAuth Redirect URIs, and this admin host to Allowed domains.</li>
                             <li>Configurations → Create from template “WhatsApp Embedded Signup Configuration With 60 Expiration Token”, or create one with login variation Embedded Signup and product Cloud API.</li>
                             <li>Request Advanced Access for <span className="font-mono text-slate-800">whatsapp_business_management</span> and <span className="font-mono text-slate-800">whatsapp_business_messaging</span>.</li>
                         </ol>
@@ -452,12 +505,12 @@ export function WabaBoard() {
                         <Field label="Meta App Secret">
                             <input className={inputClass} type="password" value={settings.metaAppSecret} onChange={(e) => setSettings({ ...settings, metaAppSecret: e.target.value })} placeholder={status.hasAppSecret ? 'Saved — paste to replace' : 'App secret'} />
                         </Field>
-                        <button type="button" className={btnClass} disabled={saving} onClick={() => run(async () => { await axios.post('/api/admin/waba/settings', settings) })}>
+                        <button type="button" className={btnClass} disabled={saving} onClick={() => run(async () => { await api.post('/settings', settings) })}>
                             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Meta settings'}
                         </button>
                         <div className="rounded-lg bg-slate-50 p-4 text-xs font-semibold text-slate-500">
                             <p>Webhook URL</p>
-                            <p className="mt-1 break-all font-mono text-slate-800">{status.webhookUrl}</p>
+                            <p className="mt-1 break-all font-mono text-slate-800">{status.webhookUrl || status.webhookSetupError}</p>
                             <p className="mt-2">Verify token</p>
                             <p className="mt-1 break-all font-mono text-slate-800">{status.verifyToken || 'Save settings to generate'}</p>
                             <p className="mt-2">Subscribe to messages, message_template_status_update, and account_update.</p>
@@ -472,6 +525,7 @@ export function WabaBoard() {
                         {status.cloudRegistered && (
                             <p className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">Cloud API registered · {status.displayPhone || status.phoneNumberId} · {status.phoneStatus}</p>
                         )}
+                        {signupError && <p className="text-sm text-slate-600">If Meta stopped customer onboarding, check the app’s business verification, App Review and Tech Provider access. Save the session ID for Meta support.</p>}
                         <Field label="Cloud API two-step PIN">
                             <input className={inputClass} value={manual.pin} onChange={(e) => setManual({ ...manual, pin: e.target.value })} placeholder="123456" />
                         </Field>
@@ -482,10 +536,10 @@ export function WabaBoard() {
                             <Field label="Phone number ID"><input className={inputClass} value={manual.phoneNumberId} onChange={(e) => setManual({ ...manual, phoneNumberId: e.target.value })} /></Field>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                            <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => { await axios.post('/api/admin/waba/manual', manual) })}>Connect with token</button>
-                            <button type="button" className={btnClass} disabled={saving || (!status.connected && !status.pendingPhone)} onClick={() => run(async () => { await axios.post('/api/admin/waba/refresh', { pin: manual.pin, accountId: status.id }) })}>Register on Cloud API</button>
-                            <button type="button" className={ghostClass} disabled={saving || (!status.connected && !status.pendingPhone)} onClick={() => run(async () => { await axios.post('/api/admin/waba/refresh', { pin: manual.pin, accountId: status.id }) })}>Refresh</button>
-                            <button type="button" className={ghostClass} disabled={saving || (!status.connected && !status.pendingPhone)} onClick={() => run(async () => { if (confirm('Disconnect this WABA?')) await axios.post('/api/admin/waba/disconnect', { accountId: status.id }) })}>Disconnect</button>
+                            <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => { await api.post('/manual', manual) })}>Connect with token</button>
+                            <button type="button" className={btnClass} disabled={saving || (!status.connected && !status.pendingPhone)} onClick={() => run(async () => { await api.post('/refresh', { pin: manual.pin, accountId: status.id }) })}>Register on Cloud API</button>
+                            <button type="button" className={ghostClass} disabled={saving || (!status.connected && !status.pendingPhone)} onClick={() => run(async () => { await api.post('/refresh', { pin: manual.pin, accountId: status.id }) })}>Refresh</button>
+                            <button type="button" className={ghostClass} disabled={saving || (!status.connected && !status.pendingPhone)} onClick={() => run(async () => { if (confirm('Disconnect this WABA?')) await api.post('/disconnect', { accountId: status.id }) })}>Disconnect</button>
                         </div>
                         {(status.connected || status.pendingPhone) && (
                             <p className="text-sm font-semibold text-slate-600">{status.displayName || 'WhatsApp'} · {status.cloudRegistered ? 'Cloud API connected' : `Cloud API ${status.platformType || status.phoneStatus || 'not registered'}`} · quality {status.qualityRating || 'unknown'}{status.businessId ? ` · business ${status.businessId}` : ''}</p>
@@ -511,9 +565,9 @@ export function WabaBoard() {
                         <Field label="Body">
                             <textarea className={cn(inputClass, 'min-h-32')} value={templateForm.body} onChange={(e) => setTemplateForm({ ...templateForm, body: e.target.value })} />
                         </Field>
-                        <button type="button" className={btnClass} disabled={saving || !status.connected} onClick={() => run(async () => { await axios.post('/api/admin/waba/templates', templateForm) })}>Submit for approval</button>
-                        <button type="button" className={ghostClass} disabled={saving || !status.connected} onClick={() => run(async () => { await axios.post('/api/admin/waba/templates/events') })}>Add 3 test templates</button>
-                        <button type="button" className={ghostClass} disabled={saving || !status.connected} onClick={() => run(async () => { await axios.post('/api/admin/waba/templates/sync') })}>Sync from Meta</button>
+                        <button type="button" className={btnClass} disabled={saving || !status.connected} onClick={() => run(async () => { await api.post('/templates', templateForm) })}>Submit for approval</button>
+                        <button type="button" className={ghostClass} disabled={saving || !status.connected} onClick={() => run(async () => { await api.post('/templates/events') })}>Add 3 test templates</button>
+                        <button type="button" className={ghostClass} disabled={saving || !status.connected} onClick={() => run(async () => { await api.post('/templates/sync') })}>Sync from Meta</button>
                     </section>
                     <section className="space-y-3">
                         {templates.map((item) => (
@@ -526,8 +580,8 @@ export function WabaBoard() {
                                 {item.rejectionReason ? <p className="mt-2 text-sm font-semibold text-red-600">{item.rejectionReason}</p> : null}
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     <input className="min-w-[10rem] flex-1 rounded-xl bg-slate-50 px-3 py-2 text-sm font-semibold" placeholder="Test mobile" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} />
-                                    <button type="button" className={ghostClass} disabled={saving || item.status !== 'APPROVED'} onClick={() => run(async () => { await axios.post('/api/admin/waba/test', { templateId: item.id, phone: testPhone }) })}>Test send</button>
-                                    <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => { if (confirm('Delete local copy of this template?')) await axios.delete(`/api/admin/waba/templates/${item.id}`) })}>Delete</button>
+                                    <button type="button" className={ghostClass} disabled={saving || item.status !== 'APPROVED'} onClick={() => run(async () => { await api.post('/test', { templateId: item.id, phone: testPhone }) })}>Test send</button>
+                                    <button type="button" className={ghostClass} disabled={saving} onClick={() => run(async () => { if (confirm('Delete local copy of this template?')) await api.delete(`/templates/${item.id}`) })}>Delete</button>
                                 </div>
                             </div>
                         ))}
@@ -556,8 +610,8 @@ export function WabaBoard() {
                             </select>
                         </Field>
                         <button type="button" className={btnClass} disabled={saving || !campaignForm.templateId} onClick={() => run(async () => {
-                            const created = await axios.post('/api/admin/waba/campaigns', campaignForm)
-                            if (confirm('Queue this campaign now?')) await axios.post(`/api/admin/waba/campaigns/${created.data.campaign.id}/send`)
+                            const created = await api.post('/campaigns', campaignForm)
+                            if (confirm('Queue this campaign now?')) await api.post(`/campaigns/${created.data.campaign.id}/send`)
                         })}>Create and queue</button>
                         <a href="/admin/email-flows" className="block text-sm font-semibold text-[#00685d]">Open Email Flows to attach WhatsApp templates →</a>
                     </section>
@@ -570,7 +624,7 @@ export function WabaBoard() {
                                 </div>
                                 <p className="mt-1 text-sm text-slate-500">{item.template?.name} · {item.audience} · queued {item.queuedCount} · sent {item.sentCount} · failed {item.failedCount}</p>
                                 {item.status === 'DRAFT' && (
-                                    <button type="button" className={cn(btnClass, 'mt-3')} disabled={saving} onClick={() => run(async () => { await axios.post(`/api/admin/waba/campaigns/${item.id}/send`) })}>Queue send</button>
+                                    <button type="button" className={cn(btnClass, 'mt-3')} disabled={saving} onClick={() => run(async () => { await api.post(`/campaigns/${item.id}/send`) })}>Queue send</button>
                                 )}
                             </div>
                         ))}

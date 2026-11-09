@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useWabaApi } from './WabaHost'
 import axios from 'axios'
 import { Download, FileText, Loader2, Search, MessageSquare, UserRound } from 'lucide-react'
 import { cn } from '../lib/cn'
@@ -79,6 +80,7 @@ export function WabaInbox(props: InboxProps) {
 function InboxThreads({
     connected, templates, accountId, displayPhone, lastWebhookAt, lastWebhookFields, all, numbers,
 }: InboxProps & { all: boolean; numbers: InboxNumber[] }) {
+    const api = useWabaApi()
     const [search, setSearch] = useState('')
     const [unreadOnly, setUnreadOnly] = useState(false)
     const [page, setPage] = useState(1)
@@ -119,7 +121,7 @@ function InboxThreads({
     const chosenTemplate = approved.some(item => item.id === templateId) ? templateId : approved[0]?.id || ''
 
     const loadInbox = async () => {
-        const res = await axios.get('/api/admin/waba/inbox', {
+        const res = await api.get('/inbox', {
             params: { accountId, ...(all ? { scope: 'all' } : {}), page, search, unread: unreadOnly },
         })
         if (activeListKey.current !== listKey) return
@@ -136,7 +138,7 @@ function InboxThreads({
     const loadThread = async (phone: string, id = receivingId, archive = archived) => {
         if (!phone) return
         const key = `${archive ? 'archive:' : ''}${id || ''}:${phone}`
-        const res = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(phone)}`, { params: { accountId: id, archive } })
+        const res = await api.get(`/inbox/${encodeURIComponent(phone)}`, { params: { accountId: id, archive } })
         if (threadIdentity.current !== key) return
         const incoming: Message[] = res.data.messages || []
         const pane = threadRef.current
@@ -155,7 +157,7 @@ function InboxThreads({
         setThreadTemplates(res.data.templates)
         setCanReply(!!res.data.canReply)
         if (!archive && (res.data.contact?.unreadCount || 0) > 0) {
-            await axios.post('/api/admin/waba/inbox/read', { phone, accountId: id }).catch(() => null)
+            await api.post('/inbox/read', { phone, accountId: id }).catch(() => null)
             setConversations(prev => prev.map(item => item.phone === phone && (item.accountId || accountId) === id ? { ...item, unreadCount: 0 } : item))
         }
     }
@@ -166,7 +168,7 @@ function InboxThreads({
         setLoadingOlder(true)
         setHistoryError('')
         try {
-            const { data } = await axios.get(`/api/admin/waba/inbox/${encodeURIComponent(activePhone)}`, {
+            const { data } = await api.get(`/inbox/${encodeURIComponent(activePhone)}`, {
                 params: { accountId: receivingId, before: olderCursor, archive: archived },
             })
             if (threadIdentity.current !== key) return
@@ -240,7 +242,7 @@ function InboxThreads({
         setAttachmentError('')
         setDownloading(item.id)
         try {
-            const { data } = await axios.get<Blob>(`/api/admin/waba/inbox/attachments/${encodeURIComponent(item.id)}`, {
+            const { data } = await api.get<Blob>(`/inbox/attachments/${encodeURIComponent(item.id)}`, {
                 params: { accountId: receivingId }, responseType: 'blob',
             })
             const url = URL.createObjectURL(data)
@@ -259,7 +261,7 @@ function InboxThreads({
         if (archived || !activePhone || !draft.trim()) return
         setSaving(true)
         try {
-            await axios.post('/api/admin/waba/inbox/reply', { phone: activePhone, text: draft.trim(), accountId: receivingId })
+            await api.post('/inbox/reply', { phone: activePhone, text: draft.trim(), accountId: receivingId })
             setDraft('')
             await Promise.all([loadThread(activePhone), loadInbox()])
         } catch (error: any) {
@@ -283,7 +285,7 @@ function InboxThreads({
         setSaving(true)
         setError('')
         try {
-            await axios.post('/api/admin/waba/inbox/template', { phone, templateId: id, accountId: receivingId })
+            await api.post('/inbox/template', { phone, templateId: id, accountId: receivingId })
             setTemplateId(id)
             setNewPhone('')
             await Promise.all([phone === activePhone ? loadThread(phone) : openThread(phone, receivingId), loadInbox()])
