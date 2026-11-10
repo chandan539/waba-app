@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useWabaApi } from './WabaHost'
+import { useWabaApi, wabaErrorMessage } from './WabaHost'
 import { ArrowDown, Clock3, Loader2, MessageSquare, Plus, Trash2, Zap } from 'lucide-react'
 import { cn } from '../lib/cn'
 import { WABA_FLOW_TRIGGERS } from '../lib/wabaTriggers'
@@ -51,7 +51,7 @@ export function WabaFlows({
         setActiveId('')
         load().then((items: Flow[]) => {
             if (items[0]) setActiveId(items[0].id)
-        }).catch((error) => alert(error.response?.data?.error || 'Could not load WhatsApp flows')).finally(() => setLoading(false))
+        }).catch((error) => alert(wabaErrorMessage(error, 'Could not load WhatsApp flows'))).finally(() => setLoading(false))
     }, [accountId])
 
     const run = async (work: () => Promise<void>) => {
@@ -61,7 +61,7 @@ export function WabaFlows({
             const items = await load()
             if (activeId && !items.some((item: Flow) => item.id === activeId)) setActiveId(items[0]?.id || '')
         } catch (error: any) {
-            alert(error.response?.data?.error || error.message || 'WhatsApp flow request failed')
+            alert(wabaErrorMessage(error, 'WhatsApp flow request failed'))
         } finally {
             setSaving(false)
         }

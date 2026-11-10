@@ -113,6 +113,7 @@ router.post('/embedded-signup', requireAdmin, async (req, res) => {
             businessId: req.body?.businessId,
             pin: req.body?.pin,
             redirectUri: req.body?.redirectUri,
+            sdk: Boolean(req.body?.sdk),
         })
         res.json({ success: true, ...status })
     } catch (error: any) {

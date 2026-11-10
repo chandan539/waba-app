@@ -80,13 +80,21 @@ try {
             oauthPath: '/tools/whatsapp', metaAppId: 'test-app', embeddedSignupConfigId: 'test-config', hasAppSecret: true,
         } } })
     })
+    await page.route('https://connect.facebook.net/**', async route => {
+        await route.fulfill({
+            contentType: 'application/javascript',
+            body: `window.FB = { init() {}, login(callback, options) { window.__fbLogin = options; callback({ status: 'unknown' }) } }; if (window.fbAsyncInit) window.fbAsyncInit()`,
+        })
+    })
     await page.goto(`http://127.0.0.1:${server.address().port}/#module`)
     await page.reload()
+    await page.getByRole('heading', { name: 'Shared inbox', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Channels', exact: true }).click()
     await page.getByRole('heading', { name: 'Channels', exact: true }).waitFor()
     await page.getByRole('status').filter({ hasText: /^Name declined$/ }).waitFor()
     const channel = page.getByLabel('Active channel')
     assert.equal(await channel.inputValue(), 'first')
-    assert.deepEqual(await channel.locator('option').allTextContents(), ['Select an account', 'Sales · •••• 0001', 'Sales · •••• 0002'])
+    assert.deepEqual(await channel.locator('option').allTextContents(), ['Select an account', 'Sales · +91 90000 00001', 'Sales · +91 90000 00002'])
     await channel.selectOption('second')
     await page.getByRole('status').filter({ hasText: /^Connected$/ }).waitFor()
     await page.getByRole('button', { name: 'Shared inbox', exact: true }).click()
@@ -98,17 +106,12 @@ try {
     assert.equal(await page.getByRole('link', { name: 'Download QR' }).getAttribute('download'), 'whatsapp-919000000002.png')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false)
     await page.screenshot({ path: path.join(directory, 'channels-mobile.png'), fullPage: true })
-    await page.context().route('https://www.facebook.com/**/dialog/oauth?**', async route => {
-        const params = new URL(route.request().url()).searchParams
-        const callback = new URL(params.get('redirect_uri'))
-        assert.equal(callback.pathname, '/tools/whatsapp')
-        assert.ok(params.get('state'))
-        callback.searchParams.set('state', params.get('state'))
-        callback.searchParams.set('error_description', 'Meta stopped this test signup')
-        await route.fulfill({ status: 302, headers: { location: callback.href } })
-    })
     await page.getByRole('button', { name: 'Connect another number' }).click()
-    await page.getByRole('alert').filter({ hasText: 'Meta stopped this test signup' }).waitFor()
+    await page.getByRole('alert').filter({ hasText: 'Meta did not finish onboarding' }).waitFor()
+    const loginOptions = await page.evaluate(() => window.__fbLogin)
+    assert.equal(loginOptions.config_id, 'test-config')
+    assert.equal(loginOptions.response_type, 'code')
+    assert.equal(loginOptions.override_default_response_type, true)
     assert.deepEqual(errors, [])
     console.log(`UI checks passed. Screenshots: ${directory}`)
 } finally { await browser.close(); server.close() }

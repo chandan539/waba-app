@@ -8,16 +8,11 @@ export type WabaAccountChoice = {
     pendingPhone?: boolean
 }
 
-export function wabaAccountLabel(account: WabaAccountChoice, accounts: WabaAccountChoice[]) {
+export function wabaAccountLabel(account: WabaAccountChoice, _accounts: WabaAccountChoice[] = []) {
     const name = account.displayName?.trim() || 'WhatsApp account'
-    const similar = accounts.filter(item => (item.displayName?.trim() || 'WhatsApp account') === name)
-    if (similar.length <= 1 && account.displayName?.trim()) return name
-
-    const ending = account.displayPhone?.replace(/\D/g, '').slice(-4)
-    if (ending && similar.filter(item => item.displayPhone?.replace(/\D/g, '').endsWith(ending)).length === 1) {
-        return `${name} · •••• ${ending}`
-    }
-    return `${name} ${similar.findIndex(item => item.id === account.id) + 1}`
+    const phone = account.displayPhone?.trim()
+    if (!phone) return name
+    return `${name} · ${phone}`
 }
 
 export function wabaConnectionLabel(status: {

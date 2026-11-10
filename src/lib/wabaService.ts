@@ -257,6 +257,7 @@ export async function exchangeEmbeddedSignup(input: {
     businessId?: string
     pin?: string
     redirectUri?: string
+    sdk?: boolean
 }) {
     const settings = await getWabaSettings()
     const appId = settings?.metaAppId
@@ -264,18 +265,21 @@ export async function exchangeEmbeddedSignup(input: {
     if (!appId || !secret) throw new Error('Save Meta App ID and App Secret first')
     if (!input.code) throw new Error('Missing Embedded Signup code')
 
-    const redirectUri = String(input.redirectUri || wabaOauthRedirectUri()).trim()
-    if (!isAllowedWabaOauthRedirectUri(redirectUri)) {
-        throw new Error('Meta redirect URL does not match WABA_ADMIN_ORIGIN and WABA_OAUTH_PATH for this installation.')
-    }
-
-    const tokenRes = await fetch(graphUrl('/oauth/access_token', {
+    const query: Record<string, string> = {
         client_id: appId,
         client_secret: secret,
-        redirect_uri: redirectUri,
         code: input.code,
-    }))
-    const tokenJson = await tokenRes.json()
+    }
+    if (!input.sdk) {
+        const redirectUri = String(input.redirectUri || wabaOauthRedirectUri()).trim()
+        if (!isAllowedWabaOauthRedirectUri(redirectUri)) {
+            throw new Error('Meta redirect URL does not match WABA_ADMIN_ORIGIN and WABA_OAUTH_PATH for this installation.')
+        }
+        query.redirect_uri = redirectUri
+    }
+
+    const tokenRes = await fetch(graphUrl('/oauth/access_token', query))
+    const tokenJson: any = await tokenRes.json()
     if (!tokenRes.ok || !tokenJson.access_token) {
         throw new Error(tokenJson?.error?.message || 'Could not exchange Meta authorization code')
     }
@@ -288,7 +292,7 @@ export async function exchangeEmbeddedSignup(input: {
             client_secret: secret,
             fb_exchange_token: accessToken,
         }))
-        const longJson = await longLived.json()
+        const longJson: any = await longLived.json()
         if (longLived.ok && longJson.access_token) accessToken = String(longJson.access_token)
     } catch {
         // Keep the original token if the long-lived exchange is unavailable.

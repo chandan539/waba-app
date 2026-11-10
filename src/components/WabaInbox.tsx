@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useWabaApi } from './WabaHost'
+import { useWabaApi, wabaErrorMessage } from './WabaHost'
 import axios from 'axios'
 import { Download, FileText, Loader2, Search, MessageSquare, UserRound } from 'lucide-react'
 import { wabaAccountLabel } from './WabaAccountSelect'
@@ -261,7 +261,7 @@ function InboxThreads({
             setDraft('')
             await Promise.all([loadThread(activePhone), loadInbox()])
         } catch (error: any) {
-            alert(error.response?.data?.error || error.message || 'Could not send reply')
+            alert(wabaErrorMessage(error, 'Could not send reply'))
         } finally {
             setSaving(false)
         }

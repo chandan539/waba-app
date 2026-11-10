@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useWabaApi } from './WabaHost'
+import { useWabaApi, wabaErrorMessage } from './WabaHost'
 import { BarChart3, Smartphone, Bot, Loader2, MessageSquare, Workflow, FileText, Megaphone, Plug, ChevronRight, Layers } from 'lucide-react'
 import { cn } from '../lib/cn'
-import { WABA_GRAPH_VERSION, WABA_OAUTH_REDIRECT_PATH, embeddedSignupDialogUrl, isFacebookMessageOrigin, parseEmbeddedSignupMessage } from '../lib/wabaSignup'
+import { WABA_GRAPH_VERSION, WABA_OAUTH_REDIRECT_PATH, isFacebookMessageOrigin, loadFacebookSdk, parseEmbeddedSignupMessage, type FacebookSdk } from '../lib/wabaSignup'
 import { WABA_FEATURE_PAUSED } from '../lib/wabaFlags'
 import { WabaAccountSelect, wabaConnectionLabel } from './WabaAccountSelect'
 import { WabaInbox } from './WabaInbox'
@@ -104,8 +104,8 @@ const emptyStatus: Status = {
 }
 
 const TABS: { id: Tab; label: string }[] = [
-    { id: 'assistant', label: 'AI assistant' },
     { id: 'inbox', label: 'Shared inbox' },
+    { id: 'assistant', label: 'AI assistant' },
     { id: 'flows', label: 'Automation' },
     { id: 'templates', label: 'Templates' },
     { id: 'campaigns', label: 'Campaigns' },
@@ -134,7 +134,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
     const api = useWabaApi()
-    const [tab, setTab] = useState<Tab>(channels ? 'channels' : 'inbox')
+    const [tab, setTab] = useState<Tab>('inbox')
     const [status, setStatus] = useState<Status>(emptyStatus)
     const [accounts, setAccounts] = useState<Account[]>([])
     const [templates, setTemplates] = useState<any[]>([])
@@ -148,6 +148,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
     const [campaignForm, setCampaignForm] = useState({ name: '', templateId: '', audience: 'ORDERS' })
     const [testPhone, setTestPhone] = useState('')
     const popupRef = useRef<Window | null>(null)
+    const facebookRef = useRef<FacebookSdk | null>(null)
     const popupCleanup = useRef<() => void>(() => {})
     const [loadError, setLoadError] = useState('')
     const [signupError, setSignupError] = useState('')
@@ -187,12 +188,22 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
                 return
             }
         }
-        load().catch((error) => setLoadError(error.response?.data?.error || 'Could not load WABA. Check the host API connection.')).finally(() => setLoading(false))
+        load().catch((error) => setLoadError(wabaErrorMessage(error, 'Could not load WABA. Check the host API connection.'))).finally(() => setLoading(false))
     }, [])
 
     useEffect(() => {
+        if (!status.metaAppId) return
+        let cancelled = false
+        loadFacebookSdk(status.metaAppId, status.graphVersion || WABA_GRAPH_VERSION)
+            .then((sdk) => { if (!cancelled) facebookRef.current = sdk })
+            .catch(() => { if (!cancelled) facebookRef.current = null })
+        return () => { cancelled = true }
+    }, [status.metaAppId, status.graphVersion])
+
+    useEffect(() => {
         const onMessage = (event: MessageEvent) => {
-            if (!isFacebookMessageOrigin(event.origin) || event.source !== popupRef.current) return
+            if (!isFacebookMessageOrigin(event.origin)) return
+            if (popupRef.current && event.source !== popupRef.current) return
             const parsed = parseEmbeddedSignupMessage(event.data)
             if (!parsed) return
             signupSession.current = {
@@ -246,7 +257,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
             phoneNumberId: session.phoneNumberId,
             businessId: session.businessId,
             pin,
-            redirectUri: callback,
+            ...(callback ? { redirectUri: callback } : { sdk: true }),
         })
         if (typeof window !== 'undefined') {
             sessionStorage.removeItem('waba_pin')
@@ -281,7 +292,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
         try {
             await work()
         } catch (error: any) {
-            alert(error.response?.data?.error || error.message || 'WABA request failed')
+            alert(wabaErrorMessage(error, 'WABA request failed'))
         } finally {
             await load().catch(() => null)
             setSaving(false)
@@ -290,7 +301,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
 
     const completeSignup = (code: string, callback: string) => run(async () => {
         try { await exchangeCode(code, callback); setSignupError('') }
-        catch (error: any) { reportSignupError(error.response?.data?.error || error.message || 'Could not complete Meta signup.') }
+        catch (error: any) { reportSignupError(wabaErrorMessage(error, 'Could not complete Meta signup.')) }
     })
 
     const connectWithMeta = () => {
@@ -315,60 +326,32 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
             return
         }
         if (status.webhookSetupError) { reportSignupError(status.webhookSetupError); return }
-        popupCleanup.current()
-        sessionStorage.removeItem('waba_es_session')
-        const state = window.crypto.randomUUID()
-        const url = embeddedSignupDialogUrl({ appId, configId, redirectUri, state })
-        sessionStorage.setItem('waba_oauth_state', state)
-        sessionStorage.setItem('waba_oauth_redirect', redirectUri)
-        sessionStorage.setItem('waba_pin', manual.pin || '')
-        const popup = window.open(url, 'fb_waba_es', 'width=620,height=780,scrollbars=yes')
-        if (!popup) {
-            window.location.assign(url)
+        const sdk = facebookRef.current
+        if (!sdk) {
+            reportSignupError('Meta login is still loading. Wait a moment and click Connect with Meta again.')
             return
         }
-        popupRef.current = popup
-        let finished = false
-        const cleanup = () => {
-            window.clearInterval(timer)
-            window.removeEventListener('message', onResult)
-            popupCleanup.current = () => {}
-            popupRef.current = null
-            try { popup.close() } catch {}
-        }
-        const finish = (code: string | null, resultState: string | null, error: string | null) => {
-            if (finished || resultState !== state) return
-            finished = true
-            cleanup()
-            sessionStorage.removeItem('waba_oauth_state')
-            sessionStorage.removeItem('waba_oauth_redirect')
-            if (code) void completeSignup(code, redirectUri)
-            else reportSignupError(error || signupSession.current.errorMessage || 'Meta did not return an authorization code.')
-        }
-        const onResult = (event: MessageEvent) => {
-            if (event.origin !== window.location.origin || event.source !== popup || event.data?.type !== 'WABA_OAUTH_RESULT') return
-            finish(event.data.code, event.data.state, event.data.error)
-        }
-        const timer = window.setInterval(() => {
-            if (popup.closed) {
-                if (!signupSession.current.errorMessage) {
-                    reportSignupError('Meta signup closed before returning an authorization code. If Meta showed an error, save its session ID and check the app in Meta for Developers.')
-                }
-                cleanup()
-                sessionStorage.removeItem('waba_oauth_state')
-                sessionStorage.removeItem('waba_oauth_redirect')
+        popupCleanup.current()
+        sessionStorage.removeItem('waba_es_session')
+        sessionStorage.setItem('waba_pin', manual.pin || '')
+        sdk.login((response) => {
+            const code = response.authResponse?.code
+            if (code) {
+                void completeSignup(code, '')
                 return
             }
-            try {
-                const result = new URL(popup.location.href)
-                if (result.origin !== callback.origin || result.pathname !== callback.pathname) return
-                const code = result.searchParams.get('code')
-                const error = result.searchParams.get('error_description') || result.searchParams.get('error')
-                if (code || error) finish(code, result.searchParams.get('state'), error)
-            } catch { /* Meta owns the popup until it redirects. */ }
-        }, 400)
-        popupCleanup.current = cleanup
-        window.addEventListener('message', onResult)
+            const session = signupSession.current
+            if (session.cancelled) {
+                reportSignupError('Meta signup was cancelled.')
+                return
+            }
+            reportSignupError(session.errorMessage || 'Meta did not finish onboarding. Use the v4 Embedded Signup configuration, then try Connect with Meta again.')
+        }, {
+            config_id: configId,
+            response_type: 'code',
+            override_default_response_type: true,
+            extras: { setup: {} },
+        })
     }
 
     if (WABA_FEATURE_PAUSED) {
@@ -396,7 +379,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
         <p>{loadError}</p><button type="button" className={ghostClass} onClick={() => void load().catch(() => {})}>Retry connection</button>
     </div>
 
-    const tabs = channels ? [channelsTab, ...TABS] : TABS
+    const tabs = channels ? [TABS[0], channelsTab, ...TABS.slice(1)] : TABS
     const activeAccount = accounts.find(account => account.id === status.id)
     const connection = wabaConnectionLabel(status)
     const selectAccount = (accountId: string) => void run(async () => {
@@ -512,7 +495,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
                         {status.cloudRegistered && (
                             <p className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">Cloud API registered · {status.displayPhone || status.phoneNumberId} · {status.phoneStatus}</p>
                         )}
-                        {signupError && <p className="text-sm text-slate-600">If Meta stopped customer onboarding, check the app’s business verification, App Review and Tech Provider access. Save the session ID for Meta support.</p>}
+                        {signupError && <p className="text-sm text-slate-600">Connect with Meta uses Embedded Signup v4. If Meta still says this business cannot onboard customers, open the Meta app and choose Use cases → Connect on WhatsApp → Become a Tech Provider, then try again. Save the session ID if Meta shows one.</p>}
                         <Field label="Cloud API two-step PIN">
                             <input className={inputClass} value={manual.pin} onChange={(e) => setManual({ ...manual, pin: e.target.value })} placeholder="123456" />
                         </Field>

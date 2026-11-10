@@ -74,6 +74,41 @@ export function parseEmbeddedSignupMessage(raw: unknown) {
     }
 }
 
+
+type FacebookAuthResponse = { authResponse?: { code?: string }; status?: string }
+export type FacebookSdk = {
+    init: (options: { appId: string; version: string; cookie?: boolean; xfbml?: boolean }) => void
+    login: (callback: (response: FacebookAuthResponse) => void, options: Record<string, unknown>) => void
+}
+
+/** Load Meta's JavaScript SDK and initialize Embedded Signup v4. */
+export function loadFacebookSdk(appId: string, version = WABA_GRAPH_VERSION) {
+    const w = window as Window & { FB?: FacebookSdk; fbAsyncInit?: () => void }
+    const init = () => {
+        w.FB?.init({ appId, version, cookie: true, xfbml: false })
+        return w.FB!
+    }
+    if (w.FB) return Promise.resolve(init())
+    return new Promise<FacebookSdk>((resolve, reject) => {
+        w.fbAsyncInit = () => resolve(init())
+        if (document.getElementById('facebook-jssdk')) {
+            const wait = window.setInterval(() => {
+                if (!w.FB) return
+                window.clearInterval(wait)
+                resolve(init())
+            }, 50)
+            window.setTimeout(() => window.clearInterval(wait), 8000)
+            return
+        }
+        const script = document.createElement('script')
+        script.id = 'facebook-jssdk'
+        script.async = true
+        script.src = 'https://connect.facebook.net/en_US/sdk.js'
+        script.onerror = () => reject(new Error('Could not load Meta login. Refresh this page and try again.'))
+        document.body.appendChild(script)
+    })
+}
+
 export function embeddedSignupDialogUrl(input: {
     appId: string
     configId: string
