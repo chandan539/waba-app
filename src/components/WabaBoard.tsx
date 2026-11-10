@@ -6,6 +6,7 @@ import { BarChart3, Smartphone, Bot, Loader2, MessageSquare, Workflow, FileText,
 import { cn } from '../lib/cn'
 import { WABA_GRAPH_VERSION, WABA_OAUTH_REDIRECT_PATH, embeddedSignupDialogUrl, isFacebookMessageOrigin, parseEmbeddedSignupMessage } from '../lib/wabaSignup'
 import { WABA_FEATURE_PAUSED } from '../lib/wabaFlags'
+import { WabaAccountSelect, wabaConnectionLabel } from './WabaAccountSelect'
 import { WabaInbox } from './WabaInbox'
 import { WabaFlows } from './WabaFlows'
 import { WabaAssistant } from './WabaAssistant'
@@ -135,7 +136,6 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
     const api = useWabaApi()
     const [tab, setTab] = useState<Tab>(channels ? 'channels' : 'inbox')
     const [status, setStatus] = useState<Status>(emptyStatus)
-    const [numberPage, setNumberPage] = useState(0)
     const [accounts, setAccounts] = useState<Account[]>([])
     const [templates, setTemplates] = useState<any[]>([])
     const [campaigns, setCampaigns] = useState<any[]>([])
@@ -396,73 +396,60 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
         <p>{loadError}</p><button type="button" className={ghostClass} onClick={() => void load().catch(() => {})}>Retry connection</button>
     </div>
 
-    const pageCount = Math.max(1, Math.ceil(accounts.length / 20))
-    const page = Math.min(numberPage, pageCount - 1)
-    const first = page * 20
     const tabs = channels ? [channelsTab, ...TABS] : TABS
+    const activeAccount = accounts.find(account => account.id === status.id)
+    const connection = wabaConnectionLabel(status)
+    const selectAccount = (accountId: string) => void run(async () => {
+        await api.post('/accounts/select', { accountId })
+    })
     const approved = templates.filter((item) => String(item.status).toUpperCase() === 'APPROVED')
 
     return (
         <div className="waba-workspace grid min-h-[48rem] overflow-hidden rounded-xl border border-slate-200 bg-[#f7f9fc] text-[#172B4D] md:grid-cols-[210px_minmax(0,1fr)]" style={{ fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' }}>
             <aside className="flex flex-col gap-6 border-b border-slate-200 bg-[#f2f4f7] p-5 md:border-b-0 md:border-r">
                 <div className="flex items-center gap-3 py-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#00685d] text-white"><MessageSquare size={22} /></span><span className="text-xl font-semibold tracking-tight">Wabix AI</span></div>
-                <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">WhatsApp workspace</p><p className="mt-1 truncate text-sm font-semibold">{status.displayName || 'Your business'}</p><p className="mt-2 truncate text-xs text-[#00685d]">{status.displayPhone || 'Connect a number to begin'}</p></div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">WhatsApp workspace</p><p className="mt-1 truncate text-sm font-semibold">{status.displayName || 'Your business'}</p></div>
                 <nav aria-label="WhatsApp navigation" className="flex flex-wrap gap-2 md:flex-col">
                     {tabs.map((item) => { const Icon = tabIcons[item.id]; return <button key={item.id} type="button" aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)} className={cn('flex items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium transition-colors', tab === item.id ? 'bg-[#00685d] text-white shadow-sm' : 'text-slate-600 hover:bg-white')}><Icon size={18} />{item.label}</button> })}
                 </nav>
                 <div className="mt-auto rounded-lg border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-500">WhatsApp Business Platform<p className="mt-1 font-medium text-[#00685d]">Customer conversations, connected.</p></div>
             </aside>
             <main className="min-w-0">
-                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{tabs.find(item => item.id === tab)?.label}</span></p><button type="button" onClick={() => setTab('numbers')} title="Switch WhatsApp number" className={cn('rounded-full px-3 py-1.5 text-xs font-medium', status.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>{status.connected ? '● Connected' : status.pendingPhone ? '● Phone pending' : '○ Not connected'}</button></header>
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{tabs.find(item => item.id === tab)?.label}</span></p>{tab !== 'channels' && <WabaAccountSelect accounts={accounts} activeId={status.id} connection={connection} busy={saving} onSelect={selectAccount} />}</header>
                 <div className="space-y-6 p-4 lg:p-7">
                 <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{tabs.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ channels: 'Connect, switch and share your WhatsApp Business channels.', analytics: 'Track messages, delivery, leads and bookings.', numbers: 'Switch between business numbers or add another connection.', assistant: 'Your business knowledge, conversations and bookings, connected.', inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Manage app updates and connect your WhatsApp Business numbers.' }[tab]}</p></div>
 
             {signupError && (tab === 'channels' || tab === 'connect') && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">{signupError}</div>}
 
-            {tab === 'channels' && <WabaChannels accounts={accounts} busy={saving} onConnect={connectWithMeta}
+            {tab === 'channels' && <WabaChannels accounts={accounts} connection={connection} busy={saving} onConnect={connectWithMeta}
                 onSettings={() => setTab('connect')}
-                onSelect={(id) => void run(async () => { await api.post('/accounts/select', { accountId: id }) })} />}
+                onSelect={selectAccount} />}
 
             {tab === 'numbers' && (
-                <section className="rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-sm font-medium" role="status">{accounts.length ? `Showing ${first + 1}–${Math.min(first + 20, accounts.length)} of ${accounts.length} numbers` : 'No numbers connected'}</p>
-                        <button type="button" className={btnClass} onClick={() => setTab('connect')}>Add a number</button>
+                <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
+                    <div>
+                        <p className="text-sm font-semibold">Manage WhatsApp accounts</p>
+                        <p className="mt-1 text-sm text-slate-500">Use the workspace dropdown to choose an account.</p>
                     </div>
-                    <div className="flex flex-col gap-2">
-                        {accounts.slice(first, first + 20).map((item) => (
-                            <div key={item.id} className={cn('flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3', item.isSelected ? 'bg-[#00685d] text-white' : 'bg-slate-50 text-slate-700')}>
-                                <button type="button" aria-pressed={item.isSelected} disabled={saving} className="min-w-0 flex-1 text-left" onClick={() => run(async () => { await api.post('/accounts/select', { accountId: item.id }) })}>
-                                    <p className="truncate text-sm font-semibold">{item.label || item.displayPhone || item.wabaId || 'WhatsApp number'}</p>
-                                    <p className={cn('text-xs font-semibold', item.isSelected ? 'text-white/70' : 'text-slate-500')}>
-                                        {item.connected ? `${item.displayName || 'Connected'} · ${item.phoneNumberId}` : item.pendingPhone ? 'Phone pending' : 'Not connected — delete if this number was removed in Meta'}
-                                    </p>
-                                </button>
-                                <button
-                                    type="button"
-                                    className={cn('h-10 rounded-xl px-3 text-xs font-semibold', item.isSelected ? 'bg-white/15 text-white' : 'bg-white text-red-600')}
-                                    disabled={saving}
-                                    onClick={() => run(async () => {
-                                        if (!confirm('Remove this WhatsApp number? Inbox, templates and flows for this number will be deleted here. This does not change Meta if you already deleted it there.')) return
-                                        await api.delete(`/accounts/${item.id}`)
-                                    })}
-                                >
-                                    Delete
-                                </button>
-                            </div>
-                        ))}
+                    <div className="flex flex-wrap gap-2">
+                        <button type="button" className={btnClass} onClick={() => setTab('connect')}>Add an account</button>
+                        {activeAccount && <button
+                            type="button"
+                            className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50"
+                            disabled={saving}
+                            onClick={() => {
+                                const name = activeAccount.displayName || 'the selected account'
+                                if (!confirm(`Remove ${name}? Its inbox, templates and flows will be deleted from this workspace.`)) return
+                                void run(async () => { await api.delete(`/accounts/${activeAccount.id}`) })
+                            }}
+                        >Remove active account</button>}
                     </div>
-                    <nav aria-label="Number pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                        <button type="button" className={ghostClass} disabled={page === 0} onClick={() => setNumberPage(page - 1)}>Previous</button>
-                        <span className="text-sm text-slate-500">Page {page + 1} of {pageCount}</span>
-                        <button type="button" className={ghostClass} disabled={page + 1 === pageCount} onClick={() => setNumberPage(page + 1)}>Next</button>
-                    </nav>
                 </section>
             )}
 
             {status.nameStatus && status.nameStatus !== 'APPROVED' && (
                 <p className="rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-                    Display name “{status.displayName || 'this number'}” is {status.nameStatus.replaceAll('_', ' ').toLowerCase()}. WhatsApp keeps a single grey tick and will not deliver chats to this inbox until Meta approves the name. Check WhatsApp Manager → Phone numbers. Then send a new hi.
+                    Display name “{status.displayName || 'this number'}” is {status.nameStatus.replaceAll('_', ' ').toLowerCase()}. Check the display name in WhatsApp Manager → Phone numbers.
                 </p>
             )}
             {status.canSendMessage === 'BLOCKED' && (

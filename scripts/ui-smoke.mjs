@@ -67,8 +67,8 @@ try {
     await page.getByText('Update to v1.2.0 was sent', { exact: false }).waitFor()
     assert.equal(updateRequested, true)
     const channels = [
-        { id: 'first', displayName: 'Front Desk', displayPhone: '+91 90000 00001', connected: true },
-        { id: 'second', displayName: 'Sales', displayPhone: '+91 90000 00002', connected: true },
+        { id: 'first', displayName: 'Sales', displayPhone: '+91 90000 00001', connected: true, nameStatus: 'DECLINED' },
+        { id: 'second', displayName: 'Sales', displayPhone: '+91 90000 00002', connected: true, cloudRegistered: true },
     ]
     let selected = 'first'
     await page.route('**/api/tools/wabix**', async route => {
@@ -83,7 +83,16 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}/#module`)
     await page.reload()
     await page.getByRole('heading', { name: 'Channels', exact: true }).waitFor()
-    await page.getByLabel('Active channel').selectOption('second')
+    await page.getByRole('status').filter({ hasText: /^Name declined$/ }).waitFor()
+    const channel = page.getByLabel('Active channel')
+    assert.equal(await channel.inputValue(), 'first')
+    assert.deepEqual(await channel.locator('option').allTextContents(), ['Select an account', 'Sales · •••• 0001', 'Sales · •••• 0002'])
+    await channel.selectOption('second')
+    await page.getByRole('status').filter({ hasText: /^Connected$/ }).waitFor()
+    await page.getByRole('button', { name: 'Shared inbox', exact: true }).click()
+    assert.equal(await page.getByLabel('Active account').inputValue(), 'second')
+    assert.equal(await page.getByLabel('Inbox business number').inputValue(), 'all')
+    await page.getByRole('button', { name: 'Channels', exact: true }).click()
     await page.locator('a[href="https://wa.me/919000000002"]').waitFor()
     await page.getByRole('link', { name: 'Download QR' }).waitFor()
     assert.equal(await page.getByRole('link', { name: 'Download QR' }).getAttribute('download'), 'whatsapp-919000000002.png')

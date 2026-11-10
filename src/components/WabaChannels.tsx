@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowUpRight, MessageCircle, Plug, QrCode } from 'lucide-react'
 import QRCode from 'qrcode'
+import { WabaAccountSelect } from './WabaAccountSelect'
 
 type Channel = {
     id: string
@@ -13,8 +14,9 @@ type Channel = {
     label: string
 }
 
-export function WabaChannels({ accounts, busy, onSelect, onConnect, onSettings }: {
+export function WabaChannels({ accounts, connection, busy, onSelect, onConnect, onSettings }: {
     accounts: Channel[]
+    connection: string
     busy: boolean
     onSelect: (id: string) => void
     onConnect: () => void
@@ -46,15 +48,7 @@ export function WabaChannels({ accounts, busy, onSelect, onConnect, onSettings }
                         <p className="text-sm text-slate-500">{accounts.filter((account) => account.connected).length} connected</p>
                     </div>
                 </div>
-                {accounts.length > 0 && <label className="grid gap-2 text-sm font-medium text-slate-700">
-                    Active channel
-                    <select disabled={busy} value={active?.id || ''} onChange={(event) => onSelect(event.target.value)} className="rounded-lg border border-slate-200 bg-white p-3 text-sm disabled:opacity-60">
-                        <option value="" disabled>Select a number</option>
-                        {accounts.map((account) => <option key={account.id} value={account.id}>
-                            {[account.displayName || account.label, account.displayPhone, account.connected ? '' : 'Setup pending'].filter(Boolean).join(' · ')}
-                        </option>)}
-                    </select>
-                </label>}
+                <WabaAccountSelect label="Active channel" accounts={accounts} activeId={active?.id} connection={connection} busy={busy} onSelect={onSelect} />
                 <div className="flex flex-wrap gap-2">
                     <button type="button" disabled={busy} onClick={onConnect} className="rounded-lg bg-[#00685d] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
                         {active?.connected ? 'Connect another number' : 'Connect with Meta'}

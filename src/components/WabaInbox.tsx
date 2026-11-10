@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useWabaApi } from './WabaHost'
 import axios from 'axios'
 import { Download, FileText, Loader2, Search, MessageSquare, UserRound } from 'lucide-react'
+import { wabaAccountLabel } from './WabaAccountSelect'
 import { cn } from '../lib/cn'
 
 type Conversation = {
@@ -51,10 +52,6 @@ type InboxProps = {
     lastWebhookFields?: string
     accounts?: InboxNumber[]
 }
-const numberLabel = (number: InboxNumber) => [...new Set([
-    number.displayName || number.label, number.displayPhone || number.phoneNumberId || number.label,
-].filter(Boolean))].join(' · ') || 'Business number'
-
 export function WabaInbox(props: InboxProps) {
     const numbers = (props.accounts || []).filter(account => account.connected)
     const [filter, setFilter] = useState('all')
@@ -64,21 +61,20 @@ export function WabaInbox(props: InboxProps) {
     const sendingId = sendingAccount?.id || props.accountId
     return <div className="min-w-0 space-y-3">
         <label className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold">
-            Business number
+            Show chats for
             <select aria-label="Inbox business number" value={selected?.id || 'all'} onChange={e => setFilter(e.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal">
-                <option value="all">All numbers and archived chats ({numbers.length || Number(props.connected)})</option>
-                {numbers.map(account => <option key={account.id} value={account.id}>{numberLabel(account)}</option>)}
+                <option value="all">All accounts and archived chats ({numbers.length || Number(props.connected)})</option>
+                {numbers.map(account => <option key={account.id} value={account.id}>{wabaAccountLabel(account, numbers)}</option>)}
             </select>
         </label>
         <InboxThreads key={selected?.id || 'all'} {...props} all={all} numbers={numbers}
             connected={props.connected || numbers.length > 0} accountId={sendingId}
-            displayPhone={sendingAccount?.displayPhone || props.displayPhone}
             templates={sendingId === props.accountId ? props.templates : []} />
     </div>
 }
 
 function InboxThreads({
-    connected, templates, accountId, displayPhone, lastWebhookAt, lastWebhookFields, all, numbers,
+    connected, templates, accountId, lastWebhookAt, lastWebhookFields, all, numbers,
 }: InboxProps & { all: boolean; numbers: InboxNumber[] }) {
     const api = useWabaApi()
     const [search, setSearch] = useState('')
@@ -101,7 +97,7 @@ function InboxThreads({
     const [downloading, setDownloading] = useState('')
     const businessName = (id?: string | null) => {
         const number = numbers.find(item => item.id === id)
-        return number ? numberLabel(number) : displayPhone || 'Business number'
+        return number ? wabaAccountLabel(number, numbers) : 'WhatsApp account'
     }
     const [messages, setMessages] = useState<Message[]>([])
     const [olderCursor, setOlderCursor] = useState<string | null>(null)
@@ -316,7 +312,7 @@ function InboxThreads({
                 <div className="space-y-3 px-4 pb-4"><label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"><Search size={16} className="shrink-0 text-slate-400" /><input aria-label="Search conversations" className="min-w-0 w-full bg-transparent text-sm outline-none" placeholder="Search conversations…" value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} /></label><div className="flex gap-2">{[false, true].map(unread => <button key={String(unread)} type="button" aria-pressed={unreadOnly === unread} onClick={() => { setUnreadOnly(unread); setPage(1) }} className={cn('rounded-full px-3 py-1 text-xs font-medium', unreadOnly === unread ? 'bg-[#00685d] text-white' : 'bg-slate-100 text-slate-600')}>{unread ? 'Unread' : 'All chats'}</button>)}</div></div>
                 {!all && !lastWebhookAt && (
                     <p className="mx-4 mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
-                        Meta is not delivering inbound webhooks yet. Replies must go to {displayPhone || 'the Cloud API number'}. In Facebook Developer, switch App Mode to <span className="font-semibold">Live</span>, then reply once from a personal WhatsApp.
+                        Meta is not delivering inbound webhooks yet. Send a test message to the selected WhatsApp account. In Facebook Developer, switch App Mode to <span className="font-semibold">Live</span>, then reply once from a personal WhatsApp.
                     </p>
                 )}
                 <nav aria-label="Contact pages" className="flex items-center justify-between gap-2 border-t border-slate-200 p-3">
@@ -347,7 +343,7 @@ function InboxThreads({
                     {!listBusy && !conversations.length && (search || unreadOnly) && <p className="px-4 py-6 text-sm text-slate-500">No contacts match this filter.</p>}
                     {!listBusy && !conversations.length && !search && !unreadOnly && (
                         <p className="px-4 py-8 text-sm font-semibold text-slate-500">
-                            {all ? 'No inbound chats across the connected numbers. ' : 'No inbound chats yet. Reply must come to '} {!all && <span className="font-semibold text-slate-900">{displayPhone || 'the Cloud API number'}</span>}
+                            {all ? 'No inbound chats across the connected numbers. ' : 'No inbound chats for this account yet. '}
                             {all ? '' : lastWebhookAt ? ` · last Meta webhook ${formatWhen(lastWebhookAt)}${lastWebhookFields ? ` (${lastWebhookFields})` : ''}` : ' · Meta has not delivered a customer message webhook yet'}
                             . Start a chat with an approved template.
                         </p>
