@@ -69,6 +69,7 @@ export function extractWabaMessageBody(message: any) {
     if (type === 'text') return { type, body: String(message?.text?.body || '').trim() }
     if (type === 'button') return { type, body: String(message?.button?.text || message?.button?.payload || '').trim() }
     if (type === 'interactive') {
+        if (message.interactive?.type === 'nfm_reply') return { type, body: 'WhatsApp form submitted' }
         const reply = message?.interactive?.button_reply || message?.interactive?.list_reply || {}
         return { type, body: String(reply.title || reply.id || '').trim() }
     }

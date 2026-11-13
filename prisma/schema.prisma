@@ -252,3 +252,30 @@ model WhatsAppAiUsage {
   calls Int @default(0)
   @@unique([accountId, day])
 }
+
+model WhatsAppForm {
+  id String @id @default(uuid())
+  accountId String
+  name String
+  fields Json
+  destination Json
+  metaFlowId String? @unique
+  published Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@index([accountId, createdAt])
+}
+
+model WhatsAppFormInvite {
+  id String @id
+  formId String
+  accountId String
+  phone String
+  expiresAt DateTime
+  @@index([expiresAt])
+}
+
+model WhatsAppFormsHubSpot {
+  id String @id
+  portalId String
+  refreshToken String
+}

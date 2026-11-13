@@ -1,3 +1,4 @@
+import formsRouter from './wabaForms'
 import { downloadWabaInboxAttachment } from '../lib/wabaInboxDownload'
 import { Router } from 'express'
 import crypto from 'crypto'
@@ -47,6 +48,7 @@ router.use((_req, res, next) => {
     next()
 })
 
+router.use('/forms', formsRouter)
 router.use('/assistant', assistantRouter)
 router.use('/analytics', analyticsRouter)
 

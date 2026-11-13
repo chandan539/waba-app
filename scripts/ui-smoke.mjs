@@ -112,6 +112,24 @@ try {
     assert.equal(loginOptions.config_id, 'test-config')
     assert.equal(loginOptions.response_type, 'code')
     assert.equal(loginOptions.override_default_response_type, true)
+    const savedForms = []
+    await page.route('**/api/tools/wabix/forms?**', route => route.fulfill({
+        json: { forms: savedForms, deliveries: [], hubspot: { configured: true, portalId: '123' } },
+    }))
+    await page.route('**/api/tools/wabix/forms', async route => {
+        const payload = route.request().postDataJSON()
+        assert.equal(payload.accountId, 'second')
+        assert.equal(payload.fields[0].target, 'email')
+        savedForms.push({ ...payload, id: 'draft', metaFlowId: null, published: false })
+        await route.fulfill({ json: savedForms[0] })
+    })
+    await page.getByRole('button', { name: 'Forms', exact: true }).click()
+    await page.getByText('Connected to portal 123').waitFor()
+    await page.getByLabel('Form name').fill('Callback request')
+    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByText('Draft saved.').waitFor()
+    await page.getByText('Callback request', { exact: true }).waitFor()
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false)
     assert.deepEqual(errors, [])
     console.log(`UI checks passed. Screenshots: ${directory}`)
 } finally { await browser.close(); server.close() }

@@ -1,3 +1,4 @@
+import { deliverFormSubmission } from './wabaForms'
 import crypto from 'crypto'
 import { getAssistantAdapters, getWabaPrisma } from './adapters'
 import { applyWabaWebhook, sendWabaTemplate } from './wabaService'
@@ -13,6 +14,7 @@ const LEASE_MS = 120000
 async function processJob(job: any) {
     const prisma = getWabaPrisma()
     const adapters = getAssistantAdapters()
+    if (job.kind === 'FORM_SUBMISSION') return deliverFormSubmission(job.key, job.payload)
     if (job.kind === 'WEBHOOK') return applyWabaWebhook(job.payload)
     if (job.kind === 'CANCEL_PAYMENT') {
         const booking = await prisma.whatsAppBooking.findUnique({ where: { id: job.payload.bookingId } })

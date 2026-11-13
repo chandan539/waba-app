@@ -12,10 +12,11 @@ import { WabaFlows } from './WabaFlows'
 import { WabaAssistant } from './WabaAssistant'
 import { WabaUpdates } from './WabaUpdates'
 
+import { WabaForms } from './WabaForms'
 import { WabaChannels } from './WabaChannels'
 import { WabaAnalytics } from './WabaAnalytics'
 
-type Tab = 'channels' | 'analytics' | 'numbers' | 'assistant' | 'inbox' | 'flows' | 'connect' | 'templates' | 'campaigns'
+type Tab = 'forms' | 'channels' | 'analytics' | 'numbers' | 'assistant' | 'inbox' | 'flows' | 'connect' | 'templates' | 'campaigns'
 type Account = {
     id: string
     isSelected: boolean
@@ -107,6 +108,7 @@ const TABS: { id: Tab; label: string }[] = [
     { id: 'inbox', label: 'Shared inbox' },
     { id: 'assistant', label: 'AI assistant' },
     { id: 'flows', label: 'Automation' },
+    { id: 'forms', label: 'Forms' },
     { id: 'templates', label: 'Templates' },
     { id: 'campaigns', label: 'Campaigns' },
     { id: 'analytics', label: 'Analytics' },
@@ -115,7 +117,7 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 const channelsTab = { id: 'channels', label: 'Channels' } as const
-const tabIcons = { channels: Layers, analytics: BarChart3, numbers: Smartphone, assistant: Bot, inbox: MessageSquare, flows: Workflow, templates: FileText, campaigns: Megaphone, connect: Plug }
+const tabIcons = { forms: FileText, channels: Layers, analytics: BarChart3, numbers: Smartphone, assistant: Bot, inbox: MessageSquare, flows: Workflow, templates: FileText, campaigns: Megaphone, connect: Plug }
 
 const emptySignupSession = { wabaId: '', phoneNumberId: '', businessId: '', event: '', cancelled: false, currentStep: '', errorMessage: '', errorCode: '', sessionId: '' }
 
@@ -134,12 +136,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
     const api = useWabaApi()
+    const [hubSpotCallback] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('wabix_hubspot'))
     const [tab, setTab] = useState<Tab>('inbox')
     const [status, setStatus] = useState<Status>(emptyStatus)
     const [accounts, setAccounts] = useState<Account[]>([])
     const [templates, setTemplates] = useState<any[]>([])
     const [campaigns, setCampaigns] = useState<any[]>([])
     const [queue, setQueue] = useState<any[]>([])
+    useEffect(() => { if (hubSpotCallback) setTab('forms') }, [hubSpotCallback])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [settings, setSettings] = useState({ metaAppId: '', embeddedSignupConfigId: '', metaAppSecret: '' })
@@ -181,7 +185,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
         }
         if (typeof window !== 'undefined') {
             const params = new URLSearchParams(window.location.search)
-            const oauthReturn = Boolean(params.get('state') && (params.get('code') || params.get('error') || params.get('error_description')))
+            const oauthReturn = !hubSpotCallback && Boolean(params.get('state') && (params.get('code') || params.get('error') || params.get('error_description')))
             const isPopup = Boolean(window.opener && window.opener !== window)
             if (oauthReturn && isPopup) {
                 setLoading(false)
@@ -271,6 +275,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
         const code = params.get('code')
         const error = params.get('error_description') || params.get('error')
         const state = params.get('state')
+        if (hubSpotCallback) return
         if (!state || (!code && !error)) return
         if (window.opener && window.opener !== window) {
             window.opener.postMessage({ type: 'WABA_OAUTH_RESULT', code, state, error }, window.location.origin)
@@ -400,7 +405,7 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
             <main className="min-w-0">
                 <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{tabs.find(item => item.id === tab)?.label}</span></p>{tab !== 'channels' && <WabaAccountSelect accounts={accounts} activeId={status.id} connection={connection} busy={saving} onSelect={selectAccount} />}</header>
                 <div className="space-y-6 p-4 lg:p-7">
-                <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{tabs.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ channels: 'Connect, switch and share your WhatsApp Business channels.', analytics: 'Track messages, delivery, leads and bookings.', numbers: 'Switch between business numbers or add another connection.', assistant: 'Your business knowledge, conversations and bookings, connected.', inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Manage app updates and connect your WhatsApp Business numbers.' }[tab]}</p></div>
+                <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{tabs.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ forms: 'Create WhatsApp forms and route submissions.', channels: 'Connect, switch and share your WhatsApp Business channels.', analytics: 'Track messages, delivery, leads and bookings.', numbers: 'Switch between business numbers or add another connection.', assistant: 'Your business knowledge, conversations and bookings, connected.', inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Manage app updates and connect your WhatsApp Business numbers.' }[tab]}</p></div>
 
             {signupError && (tab === 'channels' || tab === 'connect') && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">{signupError}</div>}
 
@@ -448,6 +453,8 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
             {tab === 'inbox' && (
                 <WabaInbox key={status.id} accounts={accounts} connected={status.connected} templates={templates} accountId={status.id} displayPhone={status.displayPhone} lastWebhookAt={status.lastWebhookAt} lastWebhookFields={status.lastWebhookFields} />
             )}
+
+            {tab === 'forms' && <WabaForms key={status.id} accountId={status.id} connected={status.connected} callback={hubSpotCallback} />}
 
             {tab === 'flows' && (
                 <WabaFlows key={status.id} templates={templates} accountId={status.id} />

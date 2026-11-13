@@ -1,3 +1,4 @@
+import { queueFormReply } from './wabaForms'
 import { inboxContacts, inboxMedia } from './wabaInboxContent'
 import { enqueueAssistantJob } from './assistantStore'
 import { getWabaPrisma, hostAudiencePhones } from './adapters'
@@ -149,7 +150,7 @@ export async function wabaPublicStatus(accountId?: string | null) {
     }
 }
 
-async function graphFetch(path: string, token: string, init?: RequestInit & { query?: Record<string, string> }) {
+export async function graphFetch(path: string, token: string, init?: RequestInit & { query?: Record<string, string> }) {
     const url = graphUrl(path, init?.query)
     const response = await fetch(url, {
         ...init,
@@ -940,7 +941,7 @@ export async function markWabaThreadRead(phone: string, accountId?: string | nul
     }).catch(() => null)
 }
 
-export async function sendWabaSessionText(input: { phone: string; text: string; accountId?: string | null }) {
+export async function sendWabaSessionText(input: { phone: string; text: string; accountId?: string | null; flow?: { id: string; token: string } }) {
     const account = await requireConnectedAccount(input.accountId)
     const phone = normalizeWabaPhone(input.phone)
     const text = String(input.text || '').trim()
@@ -956,8 +957,12 @@ export async function sendWabaSessionText(input: { phone: string; text: string; 
         body: JSON.stringify({
             messaging_product: 'whatsapp',
             to: phone,
-            type: 'text',
-            text: { body: text, preview_url: false },
+            ...(input.flow ? { type: 'interactive', interactive: {
+                type: 'flow', body: { text }, action: { name: 'flow', parameters: {
+                    flow_message_version: '3', flow_token: input.flow.token, flow_id: input.flow.id,
+                    flow_cta: 'Open form', flow_action: 'navigate', flow_action_payload: { screen: 'FORM' },
+                } },
+            } } : { type: 'text', text: { body: text, preview_url: false } }),
         }),
     })
     const metaMessageId = result?.messages?.[0]?.id || null
@@ -1228,6 +1233,7 @@ export async function applyWabaWebhook(payload: any) {
                     }))
                 }
                 for (const inbound of parsed) {
+                    const isFormReply = (inbound.raw as { interactive?: { type?: string } } | undefined)?.interactive?.type === 'nfm_reply'
                     await recordWabaMessage({
                         accountId: inboundAccount.id,
                         phone: inbound.phone,
@@ -1237,10 +1243,13 @@ export async function applyWabaWebhook(payload: any) {
                         metaMessageId: inbound.metaMessageId || null,
                         contactName: inbound.contactName || null,
                         status: inbound.direction === 'OUTBOUND' ? 'sent' : 'received',
-                        raw: inbound.raw,
+                        raw: isFormReply ? undefined : inbound.raw,
                         createdAt: inbound.timestamp,
                     })
-                    if (field === 'messages' && inbound.direction !== 'OUTBOUND' && inbound.metaMessageId && inbound.timestamp && Date.now() - +inbound.timestamp < 24 * 3600000) {
+                    if (field !== 'messages' || inbound.direction === 'OUTBOUND' || !inbound.metaMessageId) continue
+                    if (isFormReply) {
+                        await queueFormReply(inboundAccount.id, inbound.phone, inbound.raw)
+                    } else if (inbound.timestamp && Date.now() - +inbound.timestamp < 24 * 3600000) {
                         await enqueueAssistantJob(`inbound:${inbound.metaMessageId}`, 'INBOUND', { text: inbound.body, type: inbound.type, raw: inbound.raw }, inboundAccount.id, inbound.phone)
                     }
                 }
