@@ -117,3 +117,5 @@ WhatsApp media with a Meta media ID can be downloaded for up to 24 hours from th
 ## WhatsApp Forms
 
 Create and publish native WhatsApp forms and deliver answers to HubSpot or an HTTPS webhook. See the [Forms setup and update guide](docs/FORMS.md).
+
+See the [host update setup guide](docs/UPDATES.md) to enable in-app notices and scheduled automatic deployment requests.

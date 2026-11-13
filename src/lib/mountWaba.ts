@@ -1,5 +1,6 @@
 import express from 'express'
-import { setWabaAdapters, type WabaAdapters } from './adapters'
+import { setWabaAdapters, wabaAutoUpdateEnabled, type WabaAdapters } from './adapters'
+import { checkWabaAutoUpdate } from './wabaAutoUpdates'
 import { processAssistantJobs } from './assistantWorker'
 import { processWhatsAppQueue } from './wabaService'
 import wabaAdminRouter from '../routes/waba'
@@ -47,5 +48,7 @@ export function mountWaba(app: express.Express, {
 
     const stopAssistant = startWorker(2000, 'WABA_ASSISTANT', processAssistantJobs)
     const stopQueue = startWorker(60_000, 'WABA_QUEUE', processWhatsAppQueue)
-    return () => { stopAssistant(); stopQueue() }
+    const stopUpdates = wabaAutoUpdateEnabled() ? startWorker(30 * 60_000, 'WABA_UPDATE', checkWabaAutoUpdate) : undefined
+    if (stopUpdates) void checkWabaAutoUpdate().catch(error => console.error('WABA_UPDATE', error))
+    return () => { stopAssistant(); stopQueue(); stopUpdates?.() }
 }

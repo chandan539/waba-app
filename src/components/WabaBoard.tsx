@@ -10,7 +10,7 @@ import { WabaAccountSelect, wabaConnectionLabel } from './WabaAccountSelect'
 import { WabaInbox } from './WabaInbox'
 import { WabaFlows } from './WabaFlows'
 import { WabaAssistant } from './WabaAssistant'
-import { WabaUpdates } from './WabaUpdates'
+import { WabaUpdateNotice, WabaUpdates } from './WabaUpdates'
 
 import { WabaForms } from './WabaForms'
 import { WabaChannels } from './WabaChannels'
@@ -406,6 +406,8 @@ export function WabaBoard({ channels = false }: { channels?: boolean } = {}) {
                 <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4"><p className="flex items-center gap-2 text-sm text-slate-500">Workspace <ChevronRight size={14} /><span className="font-medium text-slate-900">{tabs.find(item => item.id === tab)?.label}</span></p>{tab !== 'channels' && <WabaAccountSelect accounts={accounts} activeId={status.id} connection={connection} busy={saving} onSelect={selectAccount} />}</header>
                 <div className="space-y-6 p-4 lg:p-7">
                 <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">{tabs.find(item => item.id === tab)?.label}</h1><p className="mt-1 text-sm text-slate-500">{{ forms: 'Create WhatsApp forms and route submissions.', channels: 'Connect, switch and share your WhatsApp Business channels.', analytics: 'Track messages, delivery, leads and bookings.', numbers: 'Switch between business numbers or add another connection.', assistant: 'Your business knowledge, conversations and bookings, connected.', inbox: 'Every customer conversation, in one place.', flows: 'Build thoughtful follow-ups for your customer journey.', templates: 'Create, review and test your WhatsApp messages.', campaigns: 'Reach your audience with approved messages.', connect: 'Manage app updates and connect your WhatsApp Business numbers.' }[tab]}</p></div>
+
+            {tab !== 'connect' && <WabaUpdateNotice onOpen={() => setTab('connect')} />}
 
             {signupError && (tab === 'channels' || tab === 'connect') && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">{signupError}</div>}
 

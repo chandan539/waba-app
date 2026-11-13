@@ -3,6 +3,7 @@ import request from 'supertest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setWabaAdapters } from './adapters'
 import { getWabaRelease, installedWabaVersion, webhookWabaUpdater } from './wabaUpdates'
+import { checkWabaAutoUpdate, dispatchWabaAutoUpdate } from './wabaAutoUpdates'
 import router from '../routes/wabaUpdates'
 
 const commit = 'a'.repeat(40)
@@ -46,6 +47,28 @@ describe('WABA releases', () => {
         const result = await request(server).post('/updates').send({ commit, archiveUrl: 'https://attacker.test/' })
         expect(result.status).toBe(202)
         expect(updateWaba).toHaveBeenCalledWith(expect.objectContaining({ commit, archiveUrl: `https://github.com/chandan539/waba-app/archive/${commit}.tar.gz` }), expect.stringMatching(/^[a-f0-9]{64}$/))
+    })
+
+    it('queues the same stable release across checks and only dispatches the current commit', async () => {
+        mockGithub()
+        const deploy = vi.fn(async () => {})
+        const upsert = vi.fn(async () => {})
+        const prisma = { whatsAppAssistantJob: { upsert } }
+        setWabaAdapters({ prisma, updateWaba: deploy, autoUpdateWaba: false })
+        await checkWabaAutoUpdate()
+        expect(upsert).not.toHaveBeenCalled()
+        setWabaAdapters({ prisma, updateWaba: deploy, autoUpdateWaba: true })
+        await checkWabaAutoUpdate()
+        await checkWabaAutoUpdate()
+        expect(upsert).toHaveBeenCalledTimes(2)
+        expect(upsert.mock.calls[0]).toEqual(upsert.mock.calls[1])
+        expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+            create: expect.objectContaining({ kind: 'WABA_UPDATE', payload: { commit } }), update: {},
+        }))
+        await dispatchWabaAutoUpdate('stale')
+        expect(deploy).not.toHaveBeenCalled()
+        await dispatchWabaAutoUpdate(commit)
+        expect(deploy).toHaveBeenCalledWith(expect.objectContaining({ commit }), expect.stringMatching(/^[a-f0-9]{64}$/))
     })
 
     it('keeps version visible when GitHub is unavailable', async () => {

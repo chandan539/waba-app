@@ -13,6 +13,7 @@ export type WabaAdapters = {
     prisma: any
     assistant?: AssistantAdapters
     updateWaba?: WabaUpdateAdapter
+    autoUpdateWaba?: boolean
     requireAdmin?: (req: any, res: any, next: any) => void
     getAudiencePhones?: (audience: string) => Promise<WabaAudienceRow[]>
 }
@@ -32,6 +33,7 @@ export function setWabaAdapters(next: WabaAdapters) {
     const hook = process.env.WABA_UPDATE_HOOK_URL
     const token = process.env.WABA_UPDATE_HOOK_TOKEN
     state.updateWaba = next.updateWaba || (hook && token ? webhookWabaUpdater(hook, token) : undefined)
+    state.autoUpdateWaba = next.autoUpdateWaba ?? process.env.WABA_AUTO_UPDATE === 'true'
     state.assistant = next.assistant || {}
     state.requireAdmin = next.requireAdmin || unavailableAdmin
     state.getAudiencePhones = next.getAudiencePhones || (async () => [])
@@ -55,3 +57,5 @@ export async function hostAudiencePhones(audience: string) {
 export function getAssistantAdapters(): AssistantAdapters { return state.assistant || {} }
 
 export function getWabaUpdater() { return state.updateWaba }
+
+export function wabaAutoUpdateEnabled() { return Boolean(state.updateWaba && state.autoUpdateWaba) }

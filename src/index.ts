@@ -29,3 +29,5 @@ export { listAvailableSlots, holdBooking, confirmBooking } from './lib/assistant
 
 export { installedWabaVersion, webhookWabaUpdater } from './lib/wabaUpdates'
 export type { WabaRelease, WabaUpdateAdapter } from './lib/wabaUpdates'
+
+export { checkWabaAutoUpdate } from './lib/wabaAutoUpdates'

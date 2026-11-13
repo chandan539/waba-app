@@ -1,6 +1,7 @@
+import { dispatchWabaAutoUpdate } from './wabaAutoUpdates'
 import { deliverFormSubmission } from './wabaForms'
 import crypto from 'crypto'
-import { getAssistantAdapters, getWabaPrisma } from './adapters'
+import { getAssistantAdapters, getWabaPrisma, getWabaUpdater } from './adapters'
 import { applyWabaWebhook, sendWabaTemplate } from './wabaService'
 import { deliverAssistantAction } from './assistantTransport'
 import { planAssistantReply } from './assistantEngine'
@@ -14,6 +15,7 @@ const LEASE_MS = 120000
 async function processJob(job: any) {
     const prisma = getWabaPrisma()
     const adapters = getAssistantAdapters()
+    if (job.kind === 'WABA_UPDATE') return dispatchWabaAutoUpdate(job.payload.commit)
     if (job.kind === 'FORM_SUBMISSION') return deliverFormSubmission(job.key, job.payload)
     if (job.kind === 'WEBHOOK') return applyWabaWebhook(job.payload)
     if (job.kind === 'CANCEL_PAYMENT') {
@@ -156,12 +158,15 @@ async function processJob(job: any) {
 }
 /** Run from an always-on worker every few seconds. Safe for multiple workers through DB leases. */
 export async function processAssistantJobs(limit = 20) {
-    if (WABA_FEATURE_PAUSED) return { processed: 0, failed: 0 }
+    if (WABA_FEATURE_PAUSED && !getWabaUpdater()) return { processed: 0, failed: 0 }
     const prisma = getWabaPrisma()
-    await expireBookingHolds()
-    await scheduleBookingReminders()
+    if (!WABA_FEATURE_PAUSED) {
+        await expireBookingHolds()
+        await scheduleBookingReminders()
+    }
     const jobs = await prisma.whatsAppAssistantJob.findMany({
         where: {
+            ...(WABA_FEATURE_PAUSED ? { kind: 'WABA_UPDATE' } : {}),
             OR: [
                 { status: 'PENDING', availableAt: { lte: new Date() } },
                 { status: 'PROCESSING', leaseUntil: { lt: new Date() } },

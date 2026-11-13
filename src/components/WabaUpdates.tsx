@@ -12,8 +12,32 @@ type UpdateStatus = {
     canUpdate: boolean
     available: { version: string; commit: string; releaseUrl: string } | null
     checkError?: string
+    automatic?: boolean
+    updateStatus?: string
 }
 const path = '/updates'
+
+export function WabaUpdateNotice({ onOpen }: { onOpen: () => void }) {
+    const api = useWabaApi()
+    const [release, setRelease] = useState<UpdateStatus['available']>(null)
+    useEffect(() => {
+        let active = true
+        async function check() {
+            try {
+                const { data } = await api.get<UpdateStatus>(path)
+                if (active) setRelease(data.available)
+            } catch { /* Settings has detailed update errors. */ }
+        }
+        void check()
+        const timer = window.setInterval(check, 30 * 60_000)
+        return () => { active = false; window.clearInterval(timer) }
+    }, [api])
+    if (!release) return null
+    return <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+        <span>Wabix v{release.version} is available.</span>
+        <button type="button" className="font-semibold underline" onClick={onOpen}>View app update</button>
+    </div>
+}
 
 export function WabaUpdates() {
     const api = useWabaApi()
@@ -65,10 +89,19 @@ export function WabaUpdates() {
                     : checking ? 'Checking GitHub…'
                     : status?.checkError || (release ? `v${release.version} is available.` : status && 'No newer stable release found.')}
             </p>
-            {status && !status.canUpdate && <p className="text-sm text-slate-600">Your host app needs a deployment hook to enable one-click updates.</p>}
+            {status?.automatic && <p className="text-sm text-slate-600">
+                Automatic updates are on.
+                {status.updateStatus === 'FAILED' && ' Automatic delivery failed. Check your host deployment or use Update app to retry.'}
+                {status.updateStatus === 'DONE' && ' Update sent to your deployment system.'}
+                {['PENDING', 'PROCESSING'].includes(status.updateStatus || '') && ' An update is queued.'}
+            </p>}
+            {status && !status.canUpdate && <p className="text-sm text-slate-600">
+                Install the latest release through your host once and connect its deployment hook.
+                {' '}<a className="font-medium underline" href="https://github.com/chandan539/waba-app/blob/main/docs/UPDATES.md">Setup guide</a>
+            </p>}
             {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
             <div className="flex flex-wrap items-center gap-3">
-                <button type="button" onClick={() => void update()} disabled={!status?.canUpdate || !release || Boolean(status?.checkError) || busy || checking || requested === release.version} className="inline-flex items-center gap-2 rounded-lg bg-[#00685d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                <button type="button" onClick={() => void update()} disabled={!status?.canUpdate || !release || Boolean(status?.checkError) || ['PENDING', 'PROCESSING'].includes(status?.updateStatus || '') || busy || checking || requested === release.version} className="inline-flex items-center gap-2 rounded-lg bg-[#00685d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                     <Download size={16} /> {busy ? 'Requesting update…' : 'Update app'}
                 </button>
                 <button type="button" onClick={() => void check()} disabled={checking || busy} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold disabled:opacity-50">
